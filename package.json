@@ -1,0 +1,39 @@
+{
+  "name": "awesome-workflow",
+  "private": true,
+  "version": "0.1.0",
+  "description": "A secure web and desktop micro-application platform",
+  "packageManager": "pnpm@10.0.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev --parallel",
+    "dev:api": "pnpm --filter @awesome-workflow/api dev",
+    "dev:worker": "pnpm --filter @awesome-workflow/worker dev",
+    "dev:web": "pnpm --filter @awesome-workflow/web-shell dev",
+    "dev:control-plane": "pnpm --filter @awesome-workflow/control-plane dev",
+    "dev:desktop": "pnpm --filter @awesome-workflow/desktop tauri:dev",
+    "db:generate": "pnpm --filter @awesome-workflow/api db:generate",
+    "db:migrate": "pnpm --filter @awesome-workflow/api db:migrate",
+    "generate:openapi": "pnpm --filter @awesome-workflow/api openapi:generate && openapi-typescript apps/api/src/openapi.generated.json -o packages/api-client/src/schema.ts",
+    "aw": "pnpm --filter @awesome-workflow/cli aw",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "typecheck": "turbo typecheck",
+    "test": "turbo test",
+    "lint": "turbo lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "check:rust": "cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.29.5",
+    "prettier": "^3.5.3",
+    "openapi-typescript": "^7.8.0",
+    "turbo": "^2.5.0",
+    "typescript": "^5.8.0"
+  }
+}

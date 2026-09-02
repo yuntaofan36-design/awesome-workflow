@@ -1,0 +1,64 @@
+name: publish-images
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+jobs:
+  images:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        target: [api, worker, web-shell, control-plane]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-${{ matrix.target }}
+          tags: type=semver,pattern={{version}}
+      - name: Validate static web build configuration
+        if: matrix.target == 'web-shell' || matrix.target == 'control-plane'
+        shell: bash
+        env:
+          AW_WEB_API_BASE_URL: ${{ vars.AW_WEB_API_BASE_URL }}
+          AW_CONTROL_PLANE_MANIFEST_URL: ${{ vars.AW_CONTROL_PLANE_MANIFEST_URL }}
+          AW_TRUSTED_FEDERATION_ORIGINS: ${{ vars.AW_TRUSTED_FEDERATION_ORIGINS }}
+        run: |
+          test -n "$AW_WEB_API_BASE_URL" || { echo "Missing repository variable AW_WEB_API_BASE_URL" >&2; exit 1; }
+          if [ "${{ matrix.target }}" = "web-shell" ]; then
+            test -n "$AW_CONTROL_PLANE_MANIFEST_URL" || { echo "Missing repository variable AW_CONTROL_PLANE_MANIFEST_URL" >&2; exit 1; }
+            test -n "$AW_TRUSTED_FEDERATION_ORIGINS" || { echo "Missing repository variable AW_TRUSTED_FEDERATION_ORIGINS" >&2; exit 1; }
+          fi
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/Dockerfile
+          target: ${{ matrix.target }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VITE_API_BASE_URL=${{ vars.AW_WEB_API_BASE_URL }}
+            VITE_CONTROL_PLANE_MANIFEST_URL=${{ vars.AW_CONTROL_PLANE_MANIFEST_URL }}
+            VITE_TRUSTED_FEDERATION_ORIGINS=${{ vars.AW_TRUSTED_FEDERATION_ORIGINS }}
+          provenance: mode=max
+          sbom: true
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/${{ github.repository }}-${{ matrix.target }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true

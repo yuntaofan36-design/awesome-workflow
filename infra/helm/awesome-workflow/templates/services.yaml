@@ -1,0 +1,23 @@
+{{- $root := . -}}
+{{- range $name, $component := .Values.components }}
+{{- if $component.service }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "awesome-workflow.fullname" $root }}-{{ $name }}
+  labels:
+    {{- include "awesome-workflow.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ include "awesome-workflow.name" $root }}
+    app.kubernetes.io/instance: {{ $root.Release.Name }}
+    app.kubernetes.io/component: {{ $name }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+{{- end }}
+{{- end }}
+

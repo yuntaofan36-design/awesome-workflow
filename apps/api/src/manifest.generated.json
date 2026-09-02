@@ -1,0 +1,944 @@
+{
+  "$ref": "#/definitions/AwesomeWorkflowManifest",
+  "definitions": {
+    "AwesomeWorkflowManifest": {
+      "anyOf": [
+        {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "schemaVersion": {
+                  "type": "number",
+                  "const": 1
+                },
+                "appId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 64,
+                  "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                },
+                "version": {
+                  "type": "string",
+                  "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?$"
+                },
+                "artifacts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                      },
+                      "fileName": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 240
+                      },
+                      "mediaType": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120
+                      },
+                      "size": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 2147483648
+                      },
+                      "sha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "platform": {
+                        "type": "object",
+                        "properties": {
+                          "os": {
+                            "type": "string",
+                            "enum": [
+                              "windows",
+                              "macos",
+                              "linux"
+                            ]
+                          },
+                          "arch": {
+                            "type": "string",
+                            "enum": [
+                              "x64",
+                              "arm64"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "os",
+                          "arch"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "fileName",
+                      "mediaType",
+                      "size",
+                      "sha256"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "default": []
+                },
+                "integrity": {
+                  "type": "object",
+                  "properties": {
+                    "algorithm": {
+                      "type": "string",
+                      "const": "sha256"
+                    },
+                    "digest": {
+                      "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/artifacts/items/properties/sha256"
+                    }
+                  },
+                  "required": [
+                    "algorithm",
+                    "digest"
+                  ],
+                  "additionalProperties": false
+                },
+                "signature": {
+                  "type": "object",
+                  "properties": {
+                    "algorithm": {
+                      "type": "string",
+                      "const": "ed25519"
+                    },
+                    "keyId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 160
+                    },
+                    "value": {
+                      "type": "string",
+                      "minLength": 40,
+                      "maxLength": 256
+                    }
+                  },
+                  "required": [
+                    "algorithm",
+                    "keyId",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                },
+                "kind": {
+                  "type": "string",
+                  "const": "web"
+                },
+                "routeBase": {
+                  "type": "string",
+                  "pattern": "^\\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                },
+                "hostApiVersion": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 32,
+                  "default": "1"
+                },
+                "capabilities": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "context.read",
+                      "navigation",
+                      "notifications",
+                      "api.fetch",
+                      "iframe.forms",
+                      "iframe.downloads",
+                      "iframe.popups"
+                    ]
+                  },
+                  "default": []
+                },
+                "contentSecurityPolicy": {
+                  "type": "object",
+                  "properties": {
+                    "defaultSrc": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 240
+                      },
+                      "minItems": 1,
+                      "default": [
+                        "'none'"
+                      ]
+                    },
+                    "scriptSrc": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/contentSecurityPolicy/properties/defaultSrc/items"
+                      },
+                      "default": [
+                        "'self'"
+                      ]
+                    },
+                    "styleSrc": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/contentSecurityPolicy/properties/defaultSrc/items"
+                      },
+                      "default": [
+                        "'self'"
+                      ]
+                    },
+                    "imgSrc": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/contentSecurityPolicy/properties/defaultSrc/items"
+                      },
+                      "default": [
+                        "'self'"
+                      ]
+                    },
+                    "connectSrc": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/contentSecurityPolicy/properties/defaultSrc/items"
+                      },
+                      "default": [
+                        "'self'"
+                      ]
+                    },
+                    "frameSrc": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/contentSecurityPolicy/properties/defaultSrc/items"
+                      },
+                      "default": []
+                    }
+                  },
+                  "additionalProperties": false,
+                  "default": {
+                    "defaultSrc": [
+                      "'none'"
+                    ],
+                    "scriptSrc": [
+                      "'self'"
+                    ],
+                    "styleSrc": [
+                      "'self'"
+                    ],
+                    "imgSrc": [
+                      "'self'"
+                    ],
+                    "connectSrc": [
+                      "'self'"
+                    ],
+                    "frameSrc": []
+                  }
+                },
+                "runtime": {
+                  "type": "string",
+                  "const": "federation"
+                },
+                "trustTier": {
+                  "type": "string",
+                  "const": "trusted",
+                  "default": "trusted"
+                },
+                "remoteName": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$"
+                },
+                "exposedModule": {
+                  "type": "string",
+                  "pattern": "^\\.\\/[A-Za-z0-9_./-]+$"
+                },
+                "manifestUrl": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "integritySha256": {
+                  "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/artifacts/items/properties/sha256"
+                }
+              },
+              "required": [
+                "schemaVersion",
+                "appId",
+                "version",
+                "integrity",
+                "signature",
+                "kind",
+                "routeBase",
+                "runtime",
+                "remoteName",
+                "exposedModule",
+                "manifestUrl",
+                "integritySha256"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "schemaVersion": {
+                  "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/schemaVersion"
+                },
+                "appId": {
+                  "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/appId"
+                },
+                "version": {
+                  "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/version"
+                },
+                "artifacts": {
+                  "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/artifacts"
+                },
+                "integrity": {
+                  "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/integrity"
+                },
+                "signature": {
+                  "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/signature"
+                },
+                "kind": {
+                  "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/kind"
+                },
+                "routeBase": {
+                  "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/routeBase"
+                },
+                "hostApiVersion": {
+                  "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/hostApiVersion"
+                },
+                "capabilities": {
+                  "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/capabilities"
+                },
+                "contentSecurityPolicy": {
+                  "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/contentSecurityPolicy"
+                },
+                "runtime": {
+                  "type": "string",
+                  "const": "iframe"
+                },
+                "trustTier": {
+                  "type": "string",
+                  "const": "isolated",
+                  "default": "isolated"
+                },
+                "url": {
+                  "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/manifestUrl"
+                },
+                "allowedOrigin": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "sandbox": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "allow-scripts",
+                      "allow-forms",
+                      "allow-downloads",
+                      "allow-popups"
+                    ]
+                  },
+                  "default": [
+                    "allow-scripts"
+                  ]
+                }
+              },
+              "required": [
+                "schemaVersion",
+                "appId",
+                "version",
+                "integrity",
+                "signature",
+                "kind",
+                "routeBase",
+                "runtime",
+                "url",
+                "allowedOrigin"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "schemaVersion": {
+                  "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/schemaVersion"
+                },
+                "appId": {
+                  "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/appId"
+                },
+                "version": {
+                  "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/version"
+                },
+                "artifacts": {
+                  "type": "array",
+                  "items": {
+                    "not": {}
+                  },
+                  "default": []
+                },
+                "integrity": {
+                  "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/integrity"
+                },
+                "signature": {
+                  "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/signature"
+                },
+                "kind": {
+                  "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/kind"
+                },
+                "routeBase": {
+                  "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/routeBase"
+                },
+                "hostApiVersion": {
+                  "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/hostApiVersion"
+                },
+                "capabilities": {
+                  "type": "array",
+                  "items": {
+                    "not": {}
+                  },
+                  "default": []
+                },
+                "contentSecurityPolicy": {
+                  "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/contentSecurityPolicy"
+                },
+                "runtime": {
+                  "type": "string",
+                  "const": "link"
+                },
+                "trustTier": {
+                  "type": "string",
+                  "const": "external",
+                  "default": "external"
+                },
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "schemaVersion",
+                "appId",
+                "version",
+                "integrity",
+                "signature",
+                "kind",
+                "routeBase",
+                "runtime",
+                "url"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/schemaVersion"
+            },
+            "appId": {
+              "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/appId"
+            },
+            "version": {
+              "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/version"
+            },
+            "artifacts": {
+              "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/artifacts"
+            },
+            "integrity": {
+              "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/integrity"
+            },
+            "signature": {
+              "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/signature"
+            },
+            "kind": {
+              "type": "string",
+              "const": "desktop"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 80
+            },
+            "description": {
+              "type": "string",
+              "maxLength": 240
+            },
+            "runtimes": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "platform": {
+                        "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/artifacts/items/properties/platform"
+                      },
+                      "artifact": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120
+                      },
+                      "entry": {
+                        "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/artifacts/items/properties/fileName"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "python"
+                      },
+                      "python": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 40
+                      }
+                    },
+                    "required": [
+                      "platform",
+                      "artifact",
+                      "entry",
+                      "kind",
+                      "python"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "platform": {
+                        "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/artifacts/items/properties/platform"
+                      },
+                      "artifact": {
+                        "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/1/properties/runtimes/items/anyOf/0/properties/artifact"
+                      },
+                      "entry": {
+                        "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/artifacts/items/properties/fileName"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "native"
+                      }
+                    },
+                    "required": [
+                      "platform",
+                      "artifact",
+                      "entry",
+                      "kind"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "platform": {
+                        "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/artifacts/items/properties/platform"
+                      },
+                      "artifact": {
+                        "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/1/properties/runtimes/items/anyOf/0/properties/artifact"
+                      },
+                      "entry": {
+                        "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/artifacts/items/properties/fileName"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "web-ui"
+                      },
+                      "allowedOrigins": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "default": []
+                      }
+                    },
+                    "required": [
+                      "platform",
+                      "artifact",
+                      "entry",
+                      "kind"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "minItems": 1
+            },
+            "dependencies": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "python"
+                      },
+                      "version": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 40
+                      },
+                      "lockArtifact": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "version",
+                      "lockArtifact"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "system"
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120
+                      },
+                      "version": {
+                        "type": "string",
+                        "maxLength": 80
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "name"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "application"
+                      },
+                      "appId": {
+                        "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/appId"
+                      },
+                      "version": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "appId",
+                      "version"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "default": []
+            },
+            "capabilities": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "filesystem"
+                      },
+                      "access": {
+                        "type": "string",
+                        "enum": [
+                          "read",
+                          "read-write"
+                        ]
+                      },
+                      "scopes": {
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "scope": {
+                                  "type": "string",
+                                  "const": "workspace"
+                                }
+                              },
+                              "required": [
+                                "scope"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "scope": {
+                                  "type": "string",
+                                  "const": "app-data"
+                                }
+                              },
+                              "required": [
+                                "scope"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "scope": {
+                                  "type": "string",
+                                  "const": "user-selected"
+                                }
+                              },
+                              "required": [
+                                "scope"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        "minItems": 1
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "access",
+                      "scopes"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "network"
+                      },
+                      "domains": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 253,
+                          "pattern": "^(?:\\*\\.)?[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$"
+                        },
+                        "minItems": 1
+                      },
+                      "methods": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "GET",
+                            "POST",
+                            "PUT",
+                            "PATCH",
+                            "DELETE"
+                          ]
+                        },
+                        "minItems": 1,
+                        "default": [
+                          "GET"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "domains"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "clipboard"
+                      },
+                      "access": {
+                        "type": "string",
+                        "enum": [
+                          "read",
+                          "write",
+                          "read-write"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "access"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "shortcut"
+                      },
+                      "accelerators": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        "minItems": 1
+                      },
+                      "global": {
+                        "type": "boolean",
+                        "default": false
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "accelerators"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "background"
+                      },
+                      "modes": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "scheduled",
+                            "startup",
+                            "persistent"
+                          ]
+                        },
+                        "minItems": 1
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "modes"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "lifecycle"
+                      },
+                      "actions": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "install",
+                            "update",
+                            "uninstall",
+                            "service"
+                          ]
+                        },
+                        "minItems": 1
+                      },
+                      "elevation": {
+                        "type": "string",
+                        "enum": [
+                          "never",
+                          "user-approved"
+                        ],
+                        "default": "never"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "actions"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "subprocess"
+                      },
+                      "executables": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/artifacts/items/properties/fileName"
+                        },
+                        "minItems": 1
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "executables"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "notifications"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "default": []
+            },
+            "runMode": {
+              "type": "string",
+              "enum": [
+                "singleton",
+                "serial",
+                "parallel"
+              ],
+              "default": "parallel"
+            },
+            "minHostVersion": {
+              "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/version"
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "appId",
+            "version",
+            "integrity",
+            "signature",
+            "kind",
+            "name",
+            "description",
+            "runtimes",
+            "minHostVersion"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

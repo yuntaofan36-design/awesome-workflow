@@ -1,0 +1,10 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "resources": [
+      "sidecars/awesome-workflow-agent*",
+      "sidecars/awesome-workflow-runner*",
+      "sidecars/awesome-workflow-elevated-helper*"
+    ]
+  }
+}

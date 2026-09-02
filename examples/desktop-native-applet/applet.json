@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "appId": "hello-native",
+  "version": "0.1.0",
+  "artifacts": [
+    {
+      "name": "windows-x64-native",
+      "fileName": "hello-native-windows-x64.awpkg",
+      "mediaType": "application/vnd.awesome-workflow.package+zip",
+      "size": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "platform": {
+        "os": "windows",
+        "arch": "x64"
+      }
+    },
+    {
+      "name": "macos-arm64-native",
+      "fileName": "hello-native-macos-arm64.awpkg",
+      "mediaType": "application/vnd.awesome-workflow.package+zip",
+      "size": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "platform": {
+        "os": "macos",
+        "arch": "arm64"
+      }
+    }
+  ],
+  "integrity": {
+    "algorithm": "sha256",
+    "digest": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "signature": {
+    "algorithm": "ed25519",
+    "keyId": "unconfigured-publisher-key",
+    "value": "UNSIGNED_TEMPLATE_REPLACED_BY_AW_PACKAGE_000000000000000000000000"
+  },
+  "kind": "desktop",
+  "name": "Hello Native",
+  "description": "Minimal Rust native micro-application for local Developer mode.",
+  "runtimes": [
+    {
+      "platform": {
+        "os": "windows",
+        "arch": "x64"
+      },
+      "artifact": "windows-x64-native",
+      "entry": "bin/aw-native-example.exe",
+      "kind": "native"
+    },
+    {
+      "platform": {
+        "os": "macos",
+        "arch": "arm64"
+      },
+      "artifact": "macos-arm64-native",
+      "entry": "bin/aw-native-example",
+      "kind": "native"
+    }
+  ],
+  "dependencies": [],
+  "capabilities": [],
+  "runMode": "singleton",
+  "minHostVersion": "0.1.0"
+}

@@ -1,0 +1,190 @@
+:root {
+  font-family: Bahnschrift, 'Aptos Narrow', sans-serif;
+  color: #f3f4e9;
+  background: #131713;
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+button {
+  font: inherit;
+}
+
+.board-shell {
+  min-height: 100vh;
+  padding: clamp(24px, 5vw, 72px);
+  overflow: hidden;
+  background:
+    linear-gradient(90deg, rgba(205, 255, 80, 0.04) 1px, transparent 1px) 0 0 / 48px 48px,
+    linear-gradient(rgba(205, 255, 80, 0.04) 1px, transparent 1px) 0 0 / 48px 48px,
+    radial-gradient(circle at 80% 15%, rgba(205, 255, 80, 0.12), transparent 30%),
+    #131713;
+}
+
+.eyebrow,
+.kicker,
+article span {
+  color: #aab39f;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.eyebrow span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #cdff50;
+  box-shadow: 0 0 18px #cdff50;
+}
+header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 40px;
+  padding: 8vh 0 6vh;
+}
+h1 {
+  margin: 8px 0 0;
+  font-size: clamp(64px, 13vw, 164px);
+  font-weight: 500;
+  letter-spacing: -0.07em;
+  line-height: 0.72;
+}
+.dial {
+  width: 144px;
+  aspect-ratio: 1;
+  border: 1px solid #4b5345;
+  border-radius: 50%;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  box-shadow: inset 0 0 0 12px #20261e;
+}
+.dial strong {
+  font-size: 34px;
+  color: #cdff50;
+}
+.dial small {
+  color: #87907e;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+}
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-top: 1px solid #3e463a;
+  border-bottom: 1px solid #3e463a;
+}
+article {
+  padding: 24px 0;
+}
+article + article {
+  border-left: 1px solid #3e463a;
+  padding-left: 24px;
+}
+article strong {
+  display: block;
+  margin-top: 7px;
+  font-size: 18px;
+  font-weight: 450;
+}
+.pulse-line {
+  height: 80px;
+  display: flex;
+  align-items: end;
+  gap: 8px;
+}
+.pulse-line i {
+  display: block;
+  flex: 1;
+  height: 2px;
+  background: #5e6957;
+  animation: pulse 1.9s ease-in-out infinite;
+}
+.pulse-line i:nth-child(2) {
+  animation-delay: 0.12s;
+}
+.pulse-line i:nth-child(3) {
+  animation-delay: 0.24s;
+}
+.pulse-line i:nth-child(4) {
+  animation-delay: 0.36s;
+}
+.pulse-line i:nth-child(5) {
+  animation-delay: 0.48s;
+}
+footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 36px;
+}
+footer p {
+  max-width: 560px;
+  color: #aab39f;
+  line-height: 1.65;
+}
+.actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+button {
+  border: 0;
+  padding: 13px 18px;
+  color: #18200f;
+  background: #cdff50;
+  cursor: pointer;
+}
+button.secondary {
+  color: #e9ebdf;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px #596250;
+}
+button:disabled {
+  opacity: 0.4;
+  cursor: wait;
+}
+@keyframes pulse {
+  0%,
+  100% {
+    height: 2px;
+    background: #5e6957;
+  }
+  50% {
+    height: 34px;
+    background: #cdff50;
+  }
+}
+@media (max-width: 700px) {
+  header {
+    align-items: start;
+  }
+  .dial {
+    width: 92px;
+  }
+  .status-grid {
+    grid-template-columns: 1fr;
+  }
+  article + article {
+    border-left: 0;
+    border-top: 1px solid #3e463a;
+    padding-left: 0;
+  }
+  footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

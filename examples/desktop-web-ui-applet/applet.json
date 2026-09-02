@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "appId": "hello-web-ui",
+  "version": "0.1.0",
+  "artifacts": [
+    {
+      "name": "static-web-ui",
+      "fileName": "hello-web-ui-static.awpkg",
+      "mediaType": "application/vnd.awesome-workflow.package+zip",
+      "size": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "integrity": {
+    "algorithm": "sha256",
+    "digest": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "signature": {
+    "algorithm": "ed25519",
+    "keyId": "unconfigured-publisher-key",
+    "value": "UNSIGNED_TEMPLATE_REPLACED_BY_AW_PACKAGE_000000000000000000000000"
+  },
+  "kind": "desktop",
+  "name": "Hello Web UI",
+  "description": "Static desktop web-UI assets for manifest and visual development.",
+  "runtimes": [
+    {
+      "platform": {
+        "os": "windows",
+        "arch": "x64"
+      },
+      "artifact": "static-web-ui",
+      "entry": "index.html",
+      "kind": "web-ui",
+      "allowedOrigins": []
+    },
+    {
+      "platform": {
+        "os": "macos",
+        "arch": "arm64"
+      },
+      "artifact": "static-web-ui",
+      "entry": "index.html",
+      "kind": "web-ui",
+      "allowedOrigins": []
+    }
+  ],
+  "dependencies": [],
+  "capabilities": [],
+  "runMode": "singleton",
+  "minHostVersion": "0.1.0"
+}

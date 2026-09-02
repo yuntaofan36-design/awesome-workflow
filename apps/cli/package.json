@@ -1,0 +1,27 @@
+{
+  "name": "@awesome-workflow/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "aw": "./dist/bin.js"
+  },
+  "scripts": {
+    "aw": "node dist/bin.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test src/**/*.test.ts"
+  },
+  "dependencies": {
+    "@awesome-workflow/contracts": "workspace:*",
+    "@awesome-workflow/manifest-schema": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "tsx": "^4.19.4",
+    "typescript": "catalog:"
+  }
+}

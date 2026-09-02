@@ -1,0 +1,32 @@
+{
+  "name": "@awesome-workflow/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test src/**/*.test.ts"
+  },
+  "dependencies": {
+    "@awesome-workflow/contracts": "workspace:*",
+    "@awesome-workflow/manifest-schema": "workspace:*",
+    "bullmq": "^5.56.9",
+    "ioredis": "^5.6.1",
+    "yauzl": "^3.2.0",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/yauzl": "^2.10.3",
+    "@types/yazl": "^2.4.5",
+    "tsx": "^4.19.4",
+    "typescript": "catalog:",
+    "yazl": "^3.3.1"
+  }
+}

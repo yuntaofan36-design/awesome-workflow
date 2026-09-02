@@ -1,0 +1,41 @@
+{
+  "name": "@awesome-workflow/control-plane",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc -b && vite build",
+    "dev": "vite",
+    "preview": "vite preview",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@arco-design/web-react": "^2.66.0",
+    "@awesome-workflow/contracts": "workspace:*",
+    "@awesome-workflow/manifest-schema": "workspace:*",
+    "@awesome-workflow/ui": "workspace:*",
+    "@awesome-workflow/web-sdk": "workspace:*",
+    "@tanstack/react-query": "^5.80.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.6.0",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@module-federation/vite": "^1.8.0",
+    "@tailwindcss/vite": "^4.1.0",
+    "@types/node": "catalog:",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.4.0",
+    "less": "^4.3.0",
+    "tailwindcss": "^4.1.0",
+    "typescript": "catalog:",
+    "vite": "^7.0.0",
+    "vitest": "^3.2.0"
+  }
+}

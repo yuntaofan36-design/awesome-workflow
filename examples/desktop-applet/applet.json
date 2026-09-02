@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "appId": "hello-desktop",
+  "version": "0.1.0",
+  "artifacts": [
+    {
+      "name": "windows-x64-runtime",
+      "fileName": "hello-desktop-windows-x64.awpkg",
+      "mediaType": "application/vnd.awesome-workflow.package+zip",
+      "size": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "platform": {
+        "os": "windows",
+        "arch": "x64"
+      }
+    },
+    {
+      "name": "macos-arm64-runtime",
+      "fileName": "template-macos-arm64.zip",
+      "mediaType": "application/zip",
+      "size": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "platform": {
+        "os": "macos",
+        "arch": "arm64"
+      }
+    }
+  ],
+  "integrity": {
+    "algorithm": "sha256",
+    "digest": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "signature": {
+    "algorithm": "ed25519",
+    "keyId": "unconfigured-publisher-key",
+    "value": "UNSIGNED_TEMPLATE_REPLACED_BY_AW_PACKAGE_000000000000000000000000"
+  },
+  "kind": "desktop",
+  "name": "Hello Desktop",
+  "description": "Minimal Python desktop micro-application for Windows x64 and macOS arm64.",
+  "runtimes": [
+    {
+      "platform": {
+        "os": "windows",
+        "arch": "x64"
+      },
+      "artifact": "windows-x64-runtime",
+      "entry": "main.py",
+      "kind": "python",
+      "python": "3.12"
+    },
+    {
+      "platform": {
+        "os": "macos",
+        "arch": "arm64"
+      },
+      "artifact": "macos-arm64-runtime",
+      "entry": "main.py",
+      "kind": "python",
+      "python": "3.12"
+    }
+  ],
+  "dependencies": [],
+  "capabilities": [],
+  "runMode": "singleton",
+  "minHostVersion": "0.1.0"
+}

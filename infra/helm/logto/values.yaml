@@ -1,0 +1,52 @@
+image:
+  repository: svhd/logto
+  tag: '1.31.0'
+  pullPolicy: IfNotPresent
+
+replicas: 2
+existingSecret: awesome-workflow-logto-secrets
+endpoint: https://auth.workflow.example.com
+adminEndpoint: https://auth-admin.workflow.example.com
+
+service:
+  type: ClusterIP
+  oidcPort: 3001
+  adminPort: 3002
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations: {}
+  publicHost: auth.workflow.example.com
+  publicTlsSecretName: auth-workflow-example-com-tls
+  # Keep the Console private by default. If enabled, protect it with an
+  # independent access policy; Logto application auth is not that boundary.
+  adminEnabled: false
+  adminAnnotations: {}
+  adminHost: auth-admin.workflow.example.com
+  adminTlsSecretName: auth-admin-workflow-example-com-tls
+
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits: { cpu: '1', memory: 1Gi }
+
+# The pinned image is based on node:22-alpine and does not declare USER.
+# UID 1000 is the image's existing `node` user. GID 0 is deliberate because
+# Logto makes its alteration-script directory group-writable for arbitrary
+# non-root execution. Revalidate these IDs whenever the image changes.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 0
+  fsGroup: 0
+  fsGroupChangePolicy: OnRootMismatch
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+
+migration:
+  enabled: false
+  # Verify this command against the selected Logto image before enabling.
+  command: ['npm', 'run', 'cli', 'db', 'seed', '--', '--swe']

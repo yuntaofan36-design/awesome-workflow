@@ -1,0 +1,99 @@
+name: publish-micro-app
+
+on:
+  workflow_dispatch:
+    inputs:
+      apiBaseUrl:
+        description: Awesome Workflow API base URL
+        required: true
+        type: string
+      oidcAudience:
+        description: Workload OIDC audience configured by the platform
+        required: true
+        default: https://workflow.example.com
+        type: string
+      applicationId:
+        description: Existing application UUID
+        required: true
+        type: string
+      manifestPath:
+        description: Signed manifest source path
+        required: true
+        default: awesome-workflow.manifest.json
+        type: string
+      inputDirectory:
+        description: Build output to package
+        required: true
+        default: dist
+        type: string
+      packageDirectory:
+        description: Temporary package output directory
+        required: true
+        default: .aw
+        type: string
+      signingKeyId:
+        description: Trusted Ed25519 publisher key ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.0.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - name: Request short-lived workload identity
+        id: workload
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = await core.getIDToken('${{ inputs.oidcAudience }}');
+            core.setSecret(token);
+            core.setOutput('token', token);
+      - name: Package, authenticate and publish
+        shell: bash
+        env:
+          AW_SIGNING_PRIVATE_KEY: ${{ secrets.AW_PUBLISH_SIGNING_PRIVATE_KEY }}
+          AW_PUBLISH_OIDC_TOKEN: ${{ steps.workload.outputs.token }}
+        run: |
+          test -n "$AW_SIGNING_PRIVATE_KEY"
+          pnpm aw package \
+            --manifest "${{ inputs.manifestPath }}" \
+            --input "${{ inputs.inputDirectory }}" \
+            --output "${{ inputs.packageDirectory }}" \
+            --key-id "${{ inputs.signingKeyId }}" \
+            --private-key-env AW_SIGNING_PRIVATE_KEY
+          pnpm aw login \
+            --api "${{ inputs.apiBaseUrl }}" \
+            --ci-oidc-env AW_PUBLISH_OIDC_TOKEN \
+            --config-dir .aw-ci
+          pnpm aw publish \
+            --api "${{ inputs.apiBaseUrl }}" \
+            --application-id "${{ inputs.applicationId }}" \
+            --package "${{ inputs.packageDirectory }}/package.json" \
+            --config-dir .aw-ci
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: ${{ inputs.packageDirectory }}/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: awesome-workflow-package
+          path: ${{ inputs.packageDirectory }}/
+          if-no-files-found: error
+          retention-days: 14

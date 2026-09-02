@@ -1,0 +1,29 @@
+[[permission]]
+identifier = "agent-read"
+description = "Read the Agent snapshot and bounded task logs."
+commands.allow = ["agent_snapshot", "read_task_log"]
+
+[[permission]]
+identifier = "agent-run"
+description = "Run and stop previously installed applets."
+commands.allow = ["run_applet", "stop_task"]
+
+[[permission]]
+identifier = "agent-developer"
+description = "Validate and register a local applet only while developer mode is enabled."
+commands.allow = ["validate_development_applet", "register_development_applet"]
+
+[[permission]]
+identifier = "agent-install"
+description = "Install signed immutable packages and uninstall exact versions."
+commands.allow = ["install_signed_package", "uninstall_applet"]
+
+[[permission]]
+identifier = "agent-schedule"
+description = "Apply monotonic schedule snapshots and mark the local cache offline."
+commands.allow = ["apply_schedule_snapshot", "mark_schedule_offline"]
+
+[[permission]]
+identifier = "desktop-auth"
+description = "Use the Rust-owned public-client session, read-only API broker, and one-time device enrollment boundary."
+commands.allow = ["desktop_session_current", "desktop_auth_providers", "desktop_session_login", "desktop_session_logout", "desktop_api_request", "desktop_device_enroll"]

@@ -1,0 +1,30 @@
+{
+  "name": "@awesome-workflow/manifest-schema",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./schema.json": "./dist/awesome-workflow-manifest.schema.json"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && pnpm schema:generate",
+    "schema:generate": "tsx scripts/generate-json-schema.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test src/**/*.test.ts"
+  },
+  "dependencies": {
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "tsx": "^4.19.4",
+    "typescript": "catalog:",
+    "zod-to-json-schema": "^3.24.5"
+  }
+}

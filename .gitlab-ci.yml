@@ -1,0 +1,71 @@
+stages: [validate, test, build, security, publish]
+
+default:
+  image: node:24-bookworm
+  before_script:
+    - corepack enable
+    - corepack prepare pnpm@10.0.0 --activate
+    - pnpm install --frozen-lockfile
+  cache:
+    key:
+      files: [pnpm-lock.yaml]
+    paths: [.pnpm-store/]
+
+validate:
+  stage: validate
+  script:
+    - pnpm generate:openapi
+    - git diff --exit-code -- apps/api/src/openapi.generated.json apps/api/src/manifest.generated.json packages/api-client/src/schema.ts
+    - pnpm lint
+    - pnpm typecheck
+
+helm-lint:
+  stage: validate
+  image:
+    name: alpine/helm:3.17.3
+    entrypoint: ['']
+  before_script: []
+  script:
+    - helm lint infra/helm/awesome-workflow
+    - helm lint infra/helm/logto
+
+test:
+  stage: test
+  script:
+    - pnpm test
+
+build:
+  stage: build
+  script:
+    - pnpm build
+  artifacts:
+    paths:
+      - apps/*/dist/
+      - packages/*/dist/
+
+secret-scan:
+  stage: security
+  image:
+    name: zricethezav/gitleaks:v8.24.3
+    entrypoint: ['']
+  before_script: []
+  script:
+    - gitleaks detect --source . --verbose
+
+publish:
+  stage: publish
+  image: node:24-bookworm
+  id_tokens:
+    AW_PUBLISH_OIDC_TOKEN:
+      aud: https://workflow.example.com
+  script:
+    - corepack enable
+    - corepack prepare pnpm@10.0.0 --activate
+    - pnpm install --frozen-lockfile
+    - test -n "$AW_API_BASE_URL"
+    - test -n "$AW_APPLICATION_ID"
+    - test -n "$AW_PACKAGE_METADATA"
+    - pnpm aw login --api "$AW_API_BASE_URL" --ci-oidc-env AW_PUBLISH_OIDC_TOKEN --config-dir .aw-ci
+    - pnpm aw publish --api "$AW_API_BASE_URL" --application-id "$AW_APPLICATION_ID" --package "$AW_PACKAGE_METADATA" --config-dir .aw-ci
+  rules:
+    - if: $CI_COMMIT_TAG

@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-logto
+  labels: { app.kubernetes.io/name: logto, app.kubernetes.io/instance: {{ .Release.Name }} }
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels: { app.kubernetes.io/name: logto, app.kubernetes.io/instance: {{ .Release.Name }} }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: logto, app.kubernetes.io/instance: {{ .Release.Name }} }
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: logto
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - { name: ENDPOINT, value: {{ .Values.endpoint | quote }} }
+            - { name: ADMIN_ENDPOINT, value: {{ .Values.adminEndpoint | quote }} }
+            - { name: TRUST_PROXY_HEADER, value: "1" }
+          envFrom:
+            - secretRef: { name: {{ .Values.existingSecret }} }
+          ports:
+            - { name: oidc, containerPort: 3001 }
+            - { name: admin, containerPort: 3002 }
+          readinessProbe:
+            httpGet: { path: /oidc/.well-known/openid-configuration, port: oidc }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

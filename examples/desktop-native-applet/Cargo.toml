@@ -1,0 +1,11 @@
+[package]
+name = "aw-native-example"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+
+# Keep this self-contained example out of the repository workspace build.
+[workspace]
+

@@ -1,0 +1,37 @@
+[package]
+name = "awesome-workflow-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "awesome_workflow_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.2", features = [] }
+
+[dependencies]
+anyhow.workspace = true
+awesome-workflow-agent = { path = "../../../crates/agent" }
+base64 = "0.22"
+getrandom = "0.3"
+reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "form", "json", "rustls"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tauri = { version = "2.5", features = [] }
+tauri-plugin-dialog = "2.2"
+tauri-plugin-process = "2"
+tauri-plugin-updater = "2"
+thiserror.workspace = true
+time = { version = "0.3", features = ["parsing"] }
+url = "2.5"
+uuid.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["windows-native"] }
+winreg = "0.55"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["apple-native"] }

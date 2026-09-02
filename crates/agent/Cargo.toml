@@ -1,0 +1,47 @@
+[package]
+name = "awesome-workflow-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "awesome_workflow_agent"
+path = "src/lib.rs"
+
+[[bin]]
+name = "awesome-workflow-agent"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+base64 = "0.22"
+chrono = "0.4"
+chrono-tz = "0.10"
+croner = "2.2"
+ed25519-dalek = "2.1"
+hex = "0.4"
+interprocess = "2.2"
+httparse = "1.10"
+percent-encoding = "2.3"
+rand = "0.9"
+reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "json", "rustls"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+semver = { version = "1.0", features = ["serde"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+subtle = "2.6"
+thiserror.workspace = true
+url = "2.5"
+uuid.workspace = true
+zip = { version = "2.4", default-features = false, features = ["deflate"] }
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["windows-native"] }
+widestring = "1.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["apple-native"] }
+
+[dev-dependencies]
+tempfile = "3.19"

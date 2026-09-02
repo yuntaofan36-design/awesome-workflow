@@ -1,0 +1,139 @@
+nameOverride: ''
+fullnameOverride: ''
+
+global:
+  existingSecret: awesome-workflow-secrets
+  imagePullSecrets: []
+  otlpEndpoint: ''
+
+config:
+  api:
+    publicUrl: https://workflow.example.com
+    webPublicUrl: https://workflow.example.com
+    origins: https://workflow.example.com,https://control.workflow.example.com
+    repositoryMode: postgres
+    authMode: hybrid
+    authDevExposeOtp: false
+    # Email OTP is owned by the API BFF; social authentication is brokered by
+    # Logto. Port 587 uses STARTTLS, so secure=false and requireTls=true.
+    emailDelivery: smtp
+    smtpHost: smtp.example.com
+    smtpPort: 587
+    smtpSecure: false
+    smtpRequireTls: true
+    smtpFrom: no-reply@workflow.example.com
+    emailWebhookUrl: ''
+    bootstrapAdminEmails: ''
+    validationQueueMode: redis
+    objectStorageMode: s3
+    artifactUploadBaseUrl: https://artifacts.workflow.example.com/awesome-workflow-artifacts
+    s3Endpoint: https://objects.internal.example.com
+    s3PublicEndpoint: https://artifacts.workflow.example.com
+    s3Region: us-east-1
+    s3Bucket: awesome-workflow-artifacts
+    s3ForcePathStyle: false
+    oidcIssuer: https://auth.workflow.example.com/oidc
+    oidcRedirectUri: https://workflow.example.com/api/v1/auth/oidc/callback
+    oidcPostLoginRedirect: https://workflow.example.com/
+    oidcEnabledProviders: ''
+    workloadOidcPolicies: '[]'
+  worker:
+    # Empty means the in-cluster API Service generated from the release name.
+    apiBaseUrl: ''
+    # Worker downloads use API-generated URLs signed against the internal S3
+    # endpoint, so this is deliberately not the browser-facing artifact host.
+    artifactAllowedOrigins: https://objects.internal.example.com
+    artifactMaxBytes: 268435456
+    artifactMaxFiles: 10000
+    artifactMaxExpandedBytes: 1073741824
+    sbomMaxBytes: 16777216
+
+components:
+  api:
+    runtime: api
+    replicas: 2
+    image:
+      repository: ghcr.io/your-org/awesome-workflow-api
+      tag: '0.1.0'
+      pullPolicy: IfNotPresent
+    port: 4100
+    service: true
+    healthPath: /api/v1/health
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { cpu: '1', memory: 1Gi }
+  worker:
+    runtime: worker
+    replicas: 2
+    image:
+      repository: ghcr.io/your-org/awesome-workflow-worker
+      tag: '0.1.0'
+      pullPolicy: IfNotPresent
+    port: null
+    service: false
+    healthPath: ''
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { cpu: '1', memory: 1Gi }
+  web-shell:
+    runtime: static
+    replicas: 2
+    image:
+      repository: ghcr.io/your-org/awesome-workflow-web-shell
+      tag: '0.1.0'
+      pullPolicy: IfNotPresent
+    port: 8080
+    service: true
+    healthPath: /
+    csp:
+      scriptOrigins: https://control.workflow.example.com
+      connectOrigins: https://workflow.example.com https://control.workflow.example.com
+      frameOrigins: https://micro-apps.workflow.example.com
+    resources:
+      requests: { cpu: 25m, memory: 32Mi }
+      limits: { cpu: 250m, memory: 128Mi }
+  control-plane:
+    runtime: static
+    replicas: 2
+    image:
+      repository: ghcr.io/your-org/awesome-workflow-control-plane
+      tag: '0.1.0'
+      pullPolicy: IfNotPresent
+    port: 8080
+    service: true
+    healthPath: /
+    csp:
+      scriptOrigins: ''
+      connectOrigins: https://workflow.example.com
+      frameOrigins: "'none'"
+    resources:
+      requests: { cpu: 25m, memory: 32Mi }
+      limits: { cpu: 250m, memory: 128Mi }
+
+serviceAccount:
+  create: true
+  name: ''
+  annotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations: {}
+  shellHost: workflow.example.com
+  controlPlaneHost: control.workflow.example.com
+  tls:
+    - secretName: workflow-example-com-tls
+      hosts:
+        - workflow.example.com
+        - control.workflow.example.com

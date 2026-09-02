@@ -1,0 +1,21 @@
+{
+  "$schema": "https://unpkg.com/@changesets/config@3.1.1/schema.json",
+  "access": "restricted",
+  "baseBranch": "main",
+  "commit": false,
+  "fixed": [],
+  "ignore": [],
+  "linked": [
+    [
+      "@awesome-workflow/contracts",
+      "@awesome-workflow/manifest-schema",
+      "@awesome-workflow/web-sdk",
+      "@awesome-workflow/desktop-sdk"
+    ]
+  ],
+  "privatePackages": {
+    "version": true,
+    "tag": false
+  },
+  "updateInternalDependencies": "patch"
+}

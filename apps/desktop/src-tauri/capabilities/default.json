@@ -1,0 +1,20 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-window",
+  "description": "Explicit desktop host permissions for the main management window.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:allow-open",
+    "process:allow-restart",
+    "updater:allow-check",
+    "updater:allow-download",
+    "updater:allow-install",
+    "agent-read",
+    "agent-run",
+    "agent-developer",
+    "agent-install",
+    "agent-schedule",
+    "desktop-auth"
+  ]
+}

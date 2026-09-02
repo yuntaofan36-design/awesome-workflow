@@ -1,0 +1,43 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "awesome-workflow.fullname" . }}-api-migrate
+  labels:
+    {{- include "awesome-workflow.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api-migrate
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "awesome-workflow.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: api-migrate
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: api-migrate
+          image: "{{ .Values.components.api.image.repository }}:{{ .Values.components.api.image.tag }}"
+          imagePullPolicy: {{ .Values.components.api.image.pullPolicy }}
+          command: ["node", "apps/api/dist/db/migrate.js"]
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.existingSecret }}
+                  key: DATABASE_URL
+          resources:
+            {{- toYaml .Values.components.api.resources | nindent 12 }}

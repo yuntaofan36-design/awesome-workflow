@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "artifacts": [
+    {
+      "name": "static-web-ui",
+      "input": "web"
+    }
+  ]
+}

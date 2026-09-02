@@ -1,0 +1,1 @@
+ALTER TABLE "devices" ADD COLUMN "installation_revision" bigint DEFAULT 0 NOT NULL;

@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "artifacts": [
+    {
+      "name": "windows-x64-runtime",
+      "input": "runtime"
+    },
+    {
+      "name": "macos-arm64-runtime",
+      "input": "runtime"
+    }
+  ]
+}

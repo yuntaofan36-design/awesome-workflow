@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; connect-src 'none'; img-src 'self' data:; script-src 'self'; style-src 'self'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hello Web UI</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">DESKTOP WEB UI / STATIC FIXTURE</p>
+      <h1>Small surface.<br /><em>Explicit boundary.</em></h1>
+      <p class="summary">
+        This page renders without external resources. Host RPC remains unavailable until an isolated WebView
+        and task-lease broker are connected.
+      </p>
+      <section aria-labelledby="runtime-heading">
+        <div>
+          <span>01</span>
+          <h2 id="runtime-heading">Runtime status</h2>
+        </div>
+        <strong id="runtime-status">Static preview</strong>
+      </section>
+      <section aria-labelledby="security-heading">
+        <div>
+          <span>02</span>
+          <h2 id="security-heading">Requested capabilities</h2>
+        </div>
+        <strong>None</strong>
+      </section>
+    </main>
+    <script src="./app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,13 @@
+.git
+.turbo
+node_modules
+dist
+coverage
+target
+pnpm-lock.yaml
+apps/desktop/src-tauri/gen
+apps/api/drizzle/meta
+apps/api/src/manifest.generated.json
+apps/api/src/openapi.generated.json
+packages/api-client/src/schema.ts
+infra/helm/**/templates

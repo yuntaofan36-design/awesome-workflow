@@ -1,0 +1,19 @@
+{
+  "name": "@awesome-workflow/demo-web-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b && vite build",
+    "dev": "vite",
+    "typecheck": "tsc -b --pretty false",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@awesome-workflow/web-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "vite": "^7.0.0"
+  }
+}

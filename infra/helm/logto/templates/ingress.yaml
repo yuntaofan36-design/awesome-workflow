@@ -1,0 +1,58 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-logto
+  labels: { app.kubernetes.io/name: logto, app.kubernetes.io/instance: {{ .Release.Name }} }
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- with .Values.ingress.publicTlsSecretName }}
+  tls:
+    - secretName: {{ . }}
+      hosts: [{{ $.Values.ingress.publicHost | quote }}]
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.publicHost | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-logto
+                port: { name: oidc }
+{{- end }}
+
+{{- if and .Values.ingress.enabled .Values.ingress.adminEnabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-logto-admin
+  labels: { app.kubernetes.io/name: logto, app.kubernetes.io/instance: {{ .Release.Name }} }
+  {{- with .Values.ingress.adminAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- with .Values.ingress.adminTlsSecretName }}
+  tls:
+    - secretName: {{ . }}
+      hosts: [{{ $.Values.ingress.adminHost | quote }}]
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.adminHost | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-logto
+                port: { name: admin }
+{{- end }}
