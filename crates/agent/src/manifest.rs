@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
     path::{Component, Path, PathBuf},
 };
 
@@ -248,6 +248,15 @@ pub enum ManifestKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocalizedManifestContent {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AppletManifest {
     pub schema_version: u32,
     pub app_id: String,
@@ -259,6 +268,10 @@ pub struct AppletManifest {
     pub name: String,
     #[serde(default)]
     pub description: String,
+    #[serde(default = "default_manifest_locale")]
+    pub default_locale: String,
+    #[serde(default)]
+    pub localizations: BTreeMap<String, LocalizedManifestContent>,
     pub runtimes: Vec<RuntimeSpec>,
     #[serde(default)]
     pub dependencies: Vec<DesktopDependency>,
@@ -278,6 +291,30 @@ impl AppletManifest {
         }
         if self.name.trim().len() < 2 || self.name.len() > 80 {
             return invalid("name must contain 2-80 characters".into());
+        }
+        if !matches!(self.default_locale.as_str(), "en-US" | "zh-CN") {
+            return invalid("defaultLocale is not supported".into());
+        }
+        for (locale, content) in &self.localizations {
+            if !matches!(locale.as_str(), "en-US" | "zh-CN") {
+                return invalid(format!("unsupported localization {locale}"));
+            }
+            if let Some(name) = &content.name {
+                if name.trim().len() < 2 || name.len() > 80 {
+                    return invalid(format!(
+                        "localized name for {locale} must contain 2-80 characters"
+                    ));
+                }
+            }
+            if content
+                .description
+                .as_ref()
+                .is_some_and(|value| value.len() > 240)
+            {
+                return invalid(format!(
+                    "localized description for {locale} exceeds 240 characters"
+                ));
+            }
         }
         if !is_sha256(&self.integrity.digest) {
             return invalid("integrity.digest must be lowercase SHA-256".into());
@@ -428,6 +465,10 @@ fn write_canonical_json(value: &Value, output: &mut String) -> AgentResult<()> {
     Ok(())
 }
 
+fn default_manifest_locale() -> String {
+    "en-US".into()
+}
+
 impl Capability {
     pub fn grants_workspace_read(&self) -> bool {
         matches!(self, Self::Filesystem { scopes, .. } if scopes.contains(&FileScope::Workspace))
@@ -560,6 +601,8 @@ mod tests {
             kind: ManifestKind::Desktop,
             name: "Sample".into(),
             description: String::new(),
+            default_locale: "en-US".into(),
+            localizations: Default::default(),
             runtimes: vec![RuntimeSpec {
                 platform: TargetPlatform::WINDOWS_X64,
                 artifact: "windows-runtime".into(),
@@ -610,7 +653,7 @@ mod tests {
         assert!(payload.contains(&value.integrity.digest));
         assert_eq!(
             payload,
-            r#"{"appId":"sample-app","artifacts":[{"fileName":"payload.zip","mediaType":"application/zip","name":"windows-runtime","platform":{"arch":"x64","os":"windows"},"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":4}],"capabilities":[],"dependencies":[],"description":"","integrity":{"algorithm":"sha256","digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"kind":"desktop","minHostVersion":"0.1.0","name":"Sample","runMode":"parallel","runtimes":[{"artifact":"windows-runtime","entry":"main.py","kind":"python","platform":{"arch":"x64","os":"windows"},"python":"3.12"}],"schemaVersion":1,"signature":{"algorithm":"ed25519","keyId":"test-key"},"version":"1.0.0"}"#
+            r#"{"appId":"sample-app","artifacts":[{"fileName":"payload.zip","mediaType":"application/zip","name":"windows-runtime","platform":{"arch":"x64","os":"windows"},"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":4}],"capabilities":[],"defaultLocale":"en-US","dependencies":[],"description":"","integrity":{"algorithm":"sha256","digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"kind":"desktop","localizations":{},"minHostVersion":"0.1.0","name":"Sample","runMode":"parallel","runtimes":[{"artifact":"windows-runtime","entry":"main.py","kind":"python","platform":{"arch":"x64","os":"windows"},"python":"3.12"}],"schemaVersion":1,"signature":{"algorithm":"ed25519","keyId":"test-key"},"version":"1.0.0"}"#
         );
     }
 }

@@ -32,6 +32,7 @@ test('SMTP delivery sends a fixed text-only login message without URL or file ac
     email: 'person@example.test',
     code: '042913',
     expiresInMinutes: 5,
+    locale: 'en-US',
   });
   adapter.onModuleDestroy();
 

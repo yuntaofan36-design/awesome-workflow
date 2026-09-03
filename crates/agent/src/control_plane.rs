@@ -477,20 +477,36 @@ impl ControlPlaneClient {
         }
     }
 
-    pub fn sync_agent_schedules(&self, agent: &Agent) -> AgentResult<ScheduleSyncOutcome> {
+    pub(crate) fn device_id(&self) -> String {
+        self.config.device_id().to_string()
+    }
+
+    pub fn sync_agent_schedules(
+        &self,
+        agent: &Agent,
+        verifier: &dyn crate::AuthorizationLeaseVerifier,
+    ) -> AgentResult<ScheduleSyncOutcome> {
         let result = (|| {
             let sync = agent.schedule_sync_state()?;
             let revision = sync.last_sync_at.map(|_| sync.revision);
             match self.fetch_schedule_sync(revision)? {
                 ScheduleSyncResponse::Snapshot { snapshot } => {
                     let revision = snapshot.revision;
-                    let applied = agent.apply_schedule_snapshot(&snapshot)?;
+                    let applied = agent.apply_control_plane_schedule_snapshot(
+                        &snapshot,
+                        &self.config.device_id().to_string(),
+                        verifier,
+                    )?;
                     Ok(ScheduleSyncOutcome::Snapshot { revision, applied })
                 }
                 ScheduleSyncResponse::Delta { delta } => {
                     let from_revision = delta.from_revision;
                     let to_revision = delta.to_revision;
-                    let applied = agent.apply_schedule_delta(&delta)?;
+                    let applied = agent.apply_control_plane_schedule_delta(
+                        &delta,
+                        &self.config.device_id().to_string(),
+                        verifier,
+                    )?;
                     Ok(ScheduleSyncOutcome::Delta {
                         from_revision,
                         to_revision,
@@ -944,6 +960,8 @@ pub struct RunClaim {
     #[serde(default)]
     pub args: Vec<String>,
     pub requires_elevation: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorization_lease: Option<crate::AuthorizationLease>,
 }
 
 impl RunClaim {
@@ -960,7 +978,30 @@ impl RunClaim {
                 "run claim does not match the Agent contract".into(),
             ));
         }
+        if let Some(lease) = &self.authorization_lease {
+            lease.validate()?;
+            if lease.claims.task.kind != crate::AuthorizationTaskKind::Run
+                || lease.claims.task.id != self.run_id
+                || lease.claims.revision != self.attempt
+                || lease.claims.app_id != self.app_id
+                || lease.claims.version != self.version
+                || lease.claims.intent_hash != self.authorization_intent_hash()?
+            {
+                return Err(AgentError::ControlPlane(
+                    "run authorization lease scope does not match the claim".into(),
+                ));
+            }
+        }
         Ok(())
+    }
+
+    pub(crate) fn authorization_intent_hash(&self) -> AgentResult<String> {
+        let mut intent = serde_json::to_value(self)?;
+        intent
+            .as_object_mut()
+            .ok_or_else(|| AgentError::State("run claim intent is not an object".into()))?
+            .remove("authorizationLease");
+        crate::authorization::authorization_intent_hash(&intent)
     }
 }
 
@@ -1083,6 +1124,15 @@ mod tests {
     const INSTALLATION_ID: &str = "c765258c-d755-41f6-8612-9eb7f1a9782b";
     const SCHEDULE_ID: &str = "3cf60eb1-9355-48d0-8d2f-97b3c307f0cf";
     const RUN_ID: &str = "fef02ed3-6b09-462f-ac14-51e208b490c6";
+    const APPLICATION_ID: &str = "11111111-1111-4111-8111-111111111111";
+    const RELEASE_ID: &str = "22222222-2222-4222-8222-222222222222";
+
+    struct AllowAuthorization;
+    impl crate::AuthorizationLeaseVerifier for AllowAuthorization {
+        fn verify(&self, lease: &crate::AuthorizationLease) -> AgentResult<()> {
+            lease.validate()
+        }
+    }
 
     struct StaticCredentials(Option<String>);
 
@@ -1154,9 +1204,13 @@ mod tests {
         .unwrap()
     }
 
-    fn schedule(args: &[&str]) -> Value {
-        serde_json::json!({
+    fn schedule(args: &[&str], revision: u64) -> Value {
+        let issued_at = crate::now_unix_ms();
+        let intent = serde_json::json!({
             "scheduleId": SCHEDULE_ID,
+            "revision": revision,
+            "applicationId": APPLICATION_ID,
+            "releaseId": RELEASE_ID,
             "appId": "demo-app",
             "version": "1.2.3",
             "cronExpression": "0 * * * *",
@@ -1164,7 +1218,81 @@ mod tests {
             "nextRunAtMs": crate::now_unix_ms() + 3_600_000,
             "args": args,
             "enabled": true
-        })
+        });
+        let intent_hash = crate::authorization::authorization_intent_hash(&intent).unwrap();
+        let mut record = intent;
+        record.as_object_mut().unwrap().insert(
+            "authorizationLease".into(),
+            serde_json::json!({
+                "authorizationLease": {
+                    "claims": {
+                        "schemaVersion": 1,
+                        "leaseId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                        "revision": revision,
+                        "deviceId": DEVICE_ID,
+                        "applicationId": APPLICATION_ID,
+                        "releaseId": RELEASE_ID,
+                        "appId": "demo-app",
+                        "version": "1.2.3",
+                        "task": {"kind": "schedule", "id": SCHEDULE_ID},
+                        "capabilityHash": "a".repeat(64),
+                        "intentHash": intent_hash,
+                        "issuedAt": issued_at,
+                        "expiresAt": issued_at + 300_000
+                    },
+                    "signature": {"algorithm": "ed25519", "keyId": "test", "value": "A".repeat(88)}
+                }
+            })["authorizationLease"]
+                .clone(),
+        );
+        record
+    }
+
+    #[test]
+    fn run_authorization_rejects_argument_and_elevation_tampering() {
+        let mut claim = RunClaim {
+            run_id: RUN_ID.into(),
+            attempt: 2,
+            app_id: "demo-app".into(),
+            version: "1.2.3".into(),
+            args: vec!["--safe".into()],
+            requires_elevation: false,
+            authorization_lease: None,
+        };
+        let intent_hash = claim.authorization_intent_hash().unwrap();
+        claim.authorization_lease = Some(crate::AuthorizationLease {
+            claims: crate::AuthorizationLeaseClaims {
+                schema_version: 1,
+                lease_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".into(),
+                revision: claim.attempt,
+                device_id: DEVICE_ID.into(),
+                application_id: APPLICATION_ID.into(),
+                release_id: RELEASE_ID.into(),
+                app_id: claim.app_id.clone(),
+                version: claim.version.clone(),
+                task: crate::AuthorizationLeaseTask {
+                    kind: crate::AuthorizationTaskKind::Run,
+                    id: claim.run_id.clone(),
+                },
+                capability_hash: "a".repeat(64),
+                intent_hash,
+                issued_at: 1_800_000_000_000,
+                expires_at: 1_800_000_300_000,
+            },
+            signature: crate::AuthorizationLeaseSignature {
+                algorithm: "ed25519".into(),
+                key_id: "intent-test".into(),
+                value: "A".repeat(88),
+            },
+        });
+        claim.validate().unwrap();
+
+        let mut changed_args = claim.clone();
+        changed_args.args = vec!["--unsafe".into()];
+        assert!(changed_args.validate().is_err());
+        let mut elevated = claim;
+        elevated.requires_elevation = true;
+        assert!(elevated.validate().is_err());
     }
 
     #[test]
@@ -1174,14 +1302,14 @@ mod tests {
         let transport = Arc::new(MockTransport::new(vec![
             serde_json::json!({"data": {
                 "kind": "snapshot",
-                "snapshot": {"revision": 1, "schedules": [schedule(&["--first"])]}
+                "snapshot": {"revision": 1, "schedules": [schedule(&["--first"], 1)]}
             }}),
             serde_json::json!({"data": {
                 "kind": "delta",
                 "delta": {
                     "fromRevision": 1,
                     "toRevision": 2,
-                    "upserts": [schedule(&["--updated"])],
+                    "upserts": [schedule(&["--updated"], 2)],
                     "removedScheduleIds": []
                 }
             }}),
@@ -1208,14 +1336,18 @@ mod tests {
         );
 
         assert_eq!(
-            client.sync_agent_schedules(&agent).unwrap(),
+            client
+                .sync_agent_schedules(&agent, &AllowAuthorization)
+                .unwrap(),
             ScheduleSyncOutcome::Snapshot {
                 revision: 1,
                 applied: true
             }
         );
         assert_eq!(
-            client.sync_agent_schedules(&agent).unwrap(),
+            client
+                .sync_agent_schedules(&agent, &AllowAuthorization)
+                .unwrap(),
             ScheduleSyncOutcome::Delta {
                 from_revision: 1,
                 to_revision: 2,

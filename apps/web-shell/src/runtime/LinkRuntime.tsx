@@ -2,11 +2,13 @@ import { Button } from '@arco-design/web-react';
 import { IconLaunch } from '@arco-design/web-react/icon';
 
 import type { CatalogEntry, LinkManifest } from '../types/catalog';
+import { useI18n } from '../i18n/I18nProvider';
 
 export function LinkRuntime({ entry }: { entry: CatalogEntry & { manifest: LinkManifest } }) {
+  const { t } = useI18n();
   return (
     <div className="link-runtime">
-      <span>EXTERNAL / NO HOST EXECUTION</span>
+      <span>{t('runtime.externalCode')}</span>
       <h2>{entry.name}</h2>
       <p>{entry.summary}</p>
       <code>{entry.manifest.url}</code>
@@ -17,7 +19,7 @@ export function LinkRuntime({ entry }: { entry: CatalogEntry & { manifest: LinkM
         target="_blank"
         rel="noopener noreferrer"
       >
-        Open external application
+        {t('runtime.externalOpen')}
       </Button>
     </div>
   );

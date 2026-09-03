@@ -7,15 +7,19 @@ import test from 'node:test';
 
 import { ApiClient } from './api-client.js';
 import { promoteRelease, publishPackagedRelease } from './control-plane.js';
+import { runWithCliLocale } from './i18n.js';
 import { initializeManifest, packageRelease } from './package-release.js';
 
 test('publish preserves create, upload, finalize, submit ordering including the required SBOM upload', async () => {
   const fixture = await createPackageFixture();
   const calls: string[] = [];
+  const languageHeaders: Array<{ host: string; language: string | null }> = [];
   const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url);
     const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
+    const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
     calls.push(`${method} ${url.pathname}`);
+    languageHeaders.push({ host: url.hostname, language: headers.get('accept-language') });
     if (url.pathname.endsWith('/releases') && method === 'POST') return json({ id: 'release-1' });
     if (url.pathname.endsWith('/artifacts') && method === 'POST') {
       return json({
@@ -23,13 +27,13 @@ test('publish preserves create, upload, finalize, submit ordering including the 
         upload: {
           method: 'PUT',
           url: 'https://objects.example.test/artifact.zip',
-          headers: {},
+          headers: { 'accept-language': 'must-not-leak-to-storage' },
           expiresAt: '2999-01-01T00:00:00.000Z',
         },
         sbomUpload: {
           method: 'PUT',
           url: 'https://objects.example.test/sbom.json',
-          headers: {},
+          headers: { 'accept-language': 'must-not-leak-to-storage' },
           expiresAt: '2999-01-01T00:00:00.000Z',
         },
       });
@@ -47,11 +51,13 @@ test('publish preserves create, upload, finalize, submit ordering including the 
     return new Response(null, { status: 500 });
   }) as typeof fetch;
   try {
-    const summary = await publishPackagedRelease({
-      api: new ApiClient('https://api.example.test', 'publisher-session', fetchImpl),
-      applicationId: 'application-1',
-      metadataPath: fixture.metadataPath,
-    });
+    const summary = await runWithCliLocale('zh-CN', () =>
+      publishPackagedRelease({
+        api: new ApiClient('https://api.example.test', 'publisher-session', fetchImpl),
+        applicationId: 'application-1',
+        metadataPath: fixture.metadataPath,
+      }),
+    );
     assert.equal(summary.status, 'validating');
     assert.deepEqual(calls, [
       'POST /api/v1/applications/application-1/releases',
@@ -61,6 +67,18 @@ test('publish preserves create, upload, finalize, submit ordering including the 
       'POST /api/v1/artifacts/artifact-1/finalize',
       'POST /api/v1/releases/release-1/submit',
     ]);
+    assert.equal(
+      languageHeaders
+        .filter((entry) => entry.host === 'api.example.test')
+        .every((entry) => entry.language === 'zh-CN'),
+      true,
+    );
+    assert.equal(
+      languageHeaders
+        .filter((entry) => entry.host === 'objects.example.test')
+        .every((entry) => entry.language === null),
+      true,
+    );
   } finally {
     await fixture.cleanup();
   }

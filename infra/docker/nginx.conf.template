@@ -4,6 +4,17 @@ server {
   root /usr/share/nginx/html;
   index index.html;
 
+  # The shell runtime reads this exact deployment-level upper bound before it
+  # loads any signed Federation release. The same value is enforced below by
+  # script/style/img/connect CSP directives, so runtime policy cannot drift
+  # from the response header inside one running container.
+  location = /.well-known/awesome-workflow/federation-policy {
+    default_type text/plain;
+    return 200 "${AW_CSP_SCRIPT_ORIGINS}";
+    add_header Cache-Control "no-store" always;
+    add_header X-Content-Type-Options nosniff always;
+  }
+
   location /assets/ {
     try_files $uri =404;
     add_header Cache-Control "public, max-age=31536000, immutable";
@@ -13,7 +24,7 @@ server {
     add_header Referrer-Policy strict-origin-when-cross-origin always;
     add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
     add_header Cross-Origin-Opener-Policy same-origin always;
-    add_header Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self' ${AW_CSP_SCRIPT_ORIGINS}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ${AW_CSP_CONNECT_ORIGINS}; frame-src ${AW_CSP_FRAME_ORIGINS}; form-action 'self'; frame-ancestors 'self'" always;
+    add_header Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self' ${AW_CSP_SCRIPT_ORIGINS}; style-src 'self' 'unsafe-inline' ${AW_CSP_SCRIPT_ORIGINS}; img-src 'self' data: blob: ${AW_CSP_SCRIPT_ORIGINS}; font-src 'self' data:; connect-src 'self' ${AW_CSP_SCRIPT_ORIGINS} ${AW_CSP_CONNECT_ORIGINS}; frame-src ${AW_CSP_FRAME_ORIGINS}; form-action 'self'; frame-ancestors 'self'" always;
   }
 
   location / {
@@ -27,6 +38,6 @@ server {
     add_header Referrer-Policy strict-origin-when-cross-origin always;
     add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
     add_header Cross-Origin-Opener-Policy same-origin always;
-    add_header Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self' ${AW_CSP_SCRIPT_ORIGINS}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ${AW_CSP_CONNECT_ORIGINS}; frame-src ${AW_CSP_FRAME_ORIGINS}; form-action 'self'; frame-ancestors 'self'" always;
+    add_header Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self' ${AW_CSP_SCRIPT_ORIGINS}; style-src 'self' 'unsafe-inline' ${AW_CSP_SCRIPT_ORIGINS}; img-src 'self' data: blob: ${AW_CSP_SCRIPT_ORIGINS}; font-src 'self' data:; connect-src 'self' ${AW_CSP_SCRIPT_ORIGINS} ${AW_CSP_CONNECT_ORIGINS}; frame-src ${AW_CSP_FRAME_ORIGINS}; form-action 'self'; frame-ancestors 'self'" always;
   }
 }

@@ -10,8 +10,8 @@ use std::{
 
 use anyhow::{anyhow, Context};
 use awesome_workflow_agent::{
-    AgentClient, AgentSnapshot, AppletManifest, ArtifactAttestation, InstalledApplet, RunOutcome,
-    ScheduleSnapshot, TaskRecord,
+    AgentClient, AgentLocaleSettings, AgentSnapshot, AppletManifest, ArtifactAttestation,
+    InstalledApplet, RunOutcome, ScheduleSnapshot, TaskRecord,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
@@ -20,8 +20,8 @@ use url::Url;
 mod auth;
 
 use auth::{
-    AuthProviderDescriptor, AuthenticatedApiInput, AuthenticatedApiResponse, DesktopAuth,
-    DesktopSession,
+    AuthError, AuthProviderDescriptor, AuthenticatedApiInput, AuthenticatedApiResponse,
+    DesktopAuth, DesktopLocale, DesktopSession,
 };
 
 /// The Tauri process is deliberately a management client. The durable Agent owns all
@@ -66,6 +66,27 @@ struct RunAppletInput {
 struct EnrollDeviceInput {
     workspace_id: String,
     name: String,
+    locale: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DesktopLocaleInput {
+    locale: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SetLocaleInput {
+    locale: String,
+    fallback_locales: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopCommandError {
+    code: &'static str,
+    detail: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -93,38 +114,59 @@ struct TrustedSigningKey {
     public_key: String,
 }
 
+const AUTHORIZATION_LEASE_KEY_ID_ENV: &str = "AW_AUTHORIZATION_LEASE_KEY_ID";
+const AUTHORIZATION_LEASE_PUBLIC_KEY_ENV: &str = "AW_AUTHORIZATION_LEASE_PUBLIC_KEY";
+const AUTHORIZATION_LEASE_KEY_RESOURCE: &str = "trusted-authorization-lease-public-key.json";
+
 #[tauri::command]
-fn agent_snapshot(state: State<'_, DesktopState>) -> Result<AgentSnapshot, String> {
-    state.agent.snapshot().map_err(command_error)
+fn agent_snapshot(state: State<'_, DesktopState>) -> Result<AgentSnapshot, DesktopCommandError> {
+    state
+        .agent
+        .snapshot()
+        .map_err(|error| command_error("agent_snapshot_failed", error))
+}
+
+#[tauri::command]
+async fn agent_set_locale(
+    state: State<'_, DesktopState>,
+    input: SetLocaleInput,
+) -> Result<AgentLocaleSettings, DesktopCommandError> {
+    let agent = state.agent.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        agent.set_locale(input.locale, input.fallback_locales)
+    })
+    .await
+    .map_err(|error| command_error("locale_sync_failed", error))?
+    .map_err(|error| command_error("locale_sync_failed", error))
 }
 
 #[tauri::command]
 fn validate_development_applet(
     state: State<'_, DesktopState>,
     path: PathBuf,
-) -> Result<AppletManifest, String> {
+) -> Result<AppletManifest, DesktopCommandError> {
     state
         .agent
         .validate_development_applet(path)
-        .map_err(command_error)
+        .map_err(|error| command_error("applet_validation_failed", error))
 }
 
 #[tauri::command]
 fn register_development_applet(
     state: State<'_, DesktopState>,
     path: PathBuf,
-) -> Result<InstalledApplet, String> {
+) -> Result<InstalledApplet, DesktopCommandError> {
     state
         .agent
         .register_development_applet(path)
-        .map_err(command_error)
+        .map_err(|error| command_error("development_applet_registration_failed", error))
 }
 
 #[tauri::command]
 fn install_signed_package(
     state: State<'_, DesktopState>,
     input: InstallSignedPackageInput,
-) -> Result<InstalledApplet, String> {
+) -> Result<InstalledApplet, DesktopCommandError> {
     state
         .agent
         .install_signed_package(
@@ -136,7 +178,7 @@ fn install_signed_package(
             },
             input.manifest,
         )
-        .map_err(command_error)
+        .map_err(|error| command_error("signed_package_install_failed", error))
 }
 
 #[tauri::command]
@@ -144,11 +186,11 @@ fn uninstall_applet(
     state: State<'_, DesktopState>,
     app_id: String,
     version: String,
-) -> Result<(), String> {
+) -> Result<(), DesktopCommandError> {
     state
         .agent
         .uninstall_applet(app_id, version)
-        .map_err(command_error)
+        .map_err(|error| command_error("applet_uninstall_failed", error))
 }
 
 #[tauri::command]
@@ -156,15 +198,15 @@ async fn run_applet(
     app: AppHandle,
     state: State<'_, DesktopState>,
     input: RunAppletInput,
-) -> Result<PublicRunOutcome, String> {
+) -> Result<PublicRunOutcome, DesktopCommandError> {
     let agent = state.agent.clone();
     let run_agent = agent.clone();
     let outcome = tauri::async_runtime::spawn_blocking(move || {
         run_agent.run_applet(input.app_id, input.version, input.args)
     })
     .await
-    .map_err(command_error)?
-    .map_err(command_error)?;
+    .map_err(|error| command_error("applet_run_failed", error))?
+    .map_err(|error| command_error("applet_run_failed", error))?;
 
     match outcome {
         RunOutcome::Process { task, lease: _ } => Ok(PublicRunOutcome::Process { task }),
@@ -177,7 +219,10 @@ async fn run_applet(
                 &task,
                 &launch_url,
             ) {
-                return Err(compensate_failed_web_ui_launch(&agent, &task_id, error));
+                return Err(command_error(
+                    "web_ui_launch_failed",
+                    compensate_failed_web_ui_launch(&agent, &task_id, error),
+                ));
             }
             Ok(PublicRunOutcome::WebUi { task })
         }
@@ -189,24 +234,27 @@ async fn stop_task(
     app: AppHandle,
     state: State<'_, DesktopState>,
     task_id: String,
-) -> Result<(), String> {
+) -> Result<(), DesktopCommandError> {
     let agent = state.agent.clone();
     let stop_agent = agent.clone();
     let stop_task_id = task_id.clone();
     tauri::async_runtime::spawn_blocking(move || stop_agent.stop_task(stop_task_id))
         .await
-        .map_err(command_error)?
-        .map_err(command_error)?;
+        .map_err(|error| command_error("task_stop_failed", error))?
+        .map_err(|error| command_error("task_stop_failed", error))?;
 
     let label = state
         .web_ui_windows
         .lock()
-        .map_err(|_| "Web UI window registry is unavailable".to_owned())?
+        .map_err(|_| command_error("task_stop_failed", "Web UI window registry is unavailable"))?
         .remove(&task_id);
     if let Some(label) = label {
         if let Some(window) = app.get_webview_window(&label) {
             window.destroy().map_err(|_| {
-                "Task stopped, but its Web UI window could not be closed".to_owned()
+                command_error(
+                    "task_stop_failed",
+                    "Task stopped, but its Web UI window could not be closed",
+                )
             })?;
         }
     }
@@ -214,78 +262,93 @@ async fn stop_task(
 }
 
 #[tauri::command]
-fn read_task_log(state: State<'_, DesktopState>, task_id: String) -> Result<String, String> {
-    state.agent.read_task_log(task_id).map_err(command_error)
+fn read_task_log(
+    state: State<'_, DesktopState>,
+    task_id: String,
+) -> Result<String, DesktopCommandError> {
+    state
+        .agent
+        .read_task_log(task_id)
+        .map_err(|error| command_error("task_log_read_failed", error))
 }
 
 #[tauri::command]
 fn apply_schedule_snapshot(
     state: State<'_, DesktopState>,
     snapshot: ScheduleSnapshot,
-) -> Result<bool, String> {
+) -> Result<bool, DesktopCommandError> {
     state
         .agent
         .apply_schedule_snapshot(snapshot)
-        .map_err(command_error)
+        .map_err(|error| command_error("schedule_apply_failed", error))
 }
 
 #[tauri::command]
-fn mark_schedule_offline(state: State<'_, DesktopState>) -> Result<(), String> {
-    state.agent.mark_schedule_offline().map_err(command_error)
+fn mark_schedule_offline(state: State<'_, DesktopState>) -> Result<(), DesktopCommandError> {
+    state
+        .agent
+        .mark_schedule_offline()
+        .map_err(|error| command_error("schedule_offline_failed", error))
 }
 
 #[tauri::command]
 async fn desktop_session_current(
     state: State<'_, DesktopAuthState>,
-) -> Result<Option<DesktopSession>, String> {
+    input: DesktopLocaleInput,
+) -> Result<Option<DesktopSession>, DesktopCommandError> {
     let auth = Arc::clone(&state.0);
-    tauri::async_runtime::spawn_blocking(move || auth.current())
+    tauri::async_runtime::spawn_blocking(move || auth.current(&input.locale))
         .await
-        .map_err(command_error)?
-        .map_err(command_error)
+        .map_err(|error| command_error("session_restore_failed", error))?
+        .map_err(|error| command_error(auth_error_code(&error), error))
 }
 
 #[tauri::command]
 async fn desktop_auth_providers(
     state: State<'_, DesktopAuthState>,
-) -> Result<Vec<AuthProviderDescriptor>, String> {
+    input: DesktopLocaleInput,
+) -> Result<Vec<AuthProviderDescriptor>, DesktopCommandError> {
     let auth = Arc::clone(&state.0);
-    tauri::async_runtime::spawn_blocking(move || auth.providers())
+    tauri::async_runtime::spawn_blocking(move || auth.providers(&input.locale))
         .await
-        .map_err(command_error)?
-        .map_err(command_error)
+        .map_err(|error| command_error("auth_providers_failed", error))?
+        .map_err(|error| command_error(auth_error_code(&error), error))
 }
 
 #[tauri::command]
 async fn desktop_session_login(
     state: State<'_, DesktopAuthState>,
-) -> Result<DesktopSession, String> {
+    input: DesktopLocaleInput,
+) -> Result<DesktopSession, DesktopCommandError> {
     let auth = Arc::clone(&state.0);
-    tauri::async_runtime::spawn_blocking(move || auth.login())
+    tauri::async_runtime::spawn_blocking(move || auth.login(&input.locale))
         .await
-        .map_err(command_error)?
-        .map_err(command_error)
+        .map_err(|error| command_error("sign_in_failed", error))?
+        .map_err(|error| command_error(auth_error_code(&error), error))
 }
 
 #[tauri::command]
-async fn desktop_session_logout(state: State<'_, DesktopAuthState>) -> Result<(), String> {
+async fn desktop_session_logout(
+    state: State<'_, DesktopAuthState>,
+    input: DesktopLocaleInput,
+) -> Result<(), DesktopCommandError> {
     let auth = Arc::clone(&state.0);
-    tauri::async_runtime::spawn_blocking(move || auth.logout())
+    tauri::async_runtime::spawn_blocking(move || auth.logout(&input.locale))
         .await
-        .map_err(command_error)?
-        .map_err(command_error)
+        .map_err(|error| command_error("sign_out_failed", error))?
+        .map_err(|error| command_error(auth_error_code(&error), error))
 }
 
 #[tauri::command]
 async fn desktop_api_request(
     state: State<'_, DesktopAuthState>,
     input: AuthenticatedApiInput,
-) -> Result<AuthenticatedApiResponse, String> {
+) -> Result<AuthenticatedApiResponse, DesktopCommandError> {
     let auth = Arc::clone(&state.0);
     tauri::async_runtime::spawn_blocking(move || auth.authenticated_request(input))
         .await
-        .map_err(command_error)?
-        .map_err(command_error)
+        .map_err(|error| command_error("api_request_failed", error))?
+        .map_err(|error| command_error(auth_error_code(&error), error))
 }
 
 #[tauri::command]
@@ -293,18 +356,33 @@ async fn desktop_device_enroll(
     desktop: State<'_, DesktopState>,
     auth: State<'_, DesktopAuthState>,
     input: EnrollDeviceInput,
-) -> Result<EnrolledDevice, String> {
+) -> Result<EnrolledDevice, DesktopCommandError> {
+    let locale = DesktopLocale::parse(&input.locale)
+        .map_err(|error| command_error(auth_error_code(&error), error))?;
     let name = input.name.trim().to_owned();
     if name.is_empty() || name.len() > 120 {
-        return Err("Device name must contain 1-120 characters".into());
+        return Err(command_error(
+            "device_name_invalid",
+            "Device name must contain 1-120 characters",
+        ));
     }
     let agent = desktop.agent.clone();
     let auth = Arc::clone(&auth.0);
     tauri::async_runtime::spawn_blocking(move || {
-        if agent.snapshot().map_err(command_error)?.device.is_some() {
-            return Err("This Agent is already enrolled".into());
+        if agent
+            .snapshot()
+            .map_err(|error| command_error("device_enrollment_failed", error))?
+            .device
+            .is_some()
+        {
+            return Err(command_error(
+                "agent_already_enrolled",
+                "This Agent is already enrolled",
+            ));
         }
-        let preparation = agent.prepare_device_enrollment().map_err(command_error)?;
+        let preparation = agent
+            .prepare_device_enrollment()
+            .map_err(|error| command_error("device_enrollment_failed", error))?;
         let body = serde_json::json!({
             "workspaceId": input.workspace_id,
             "name": name,
@@ -314,11 +392,13 @@ async fn desktop_device_enroll(
             "publicKeyThumbprint": preparation.public_key_thumbprint,
         });
         let api_base_url = auth.api_base_url();
-        let secret = auth.register_device(body).map_err(command_error)?;
+        let secret = auth
+            .register_device(body, locale.as_str())
+            .map_err(|error| command_error(auth_error_code(&error), error))?;
         let device_id = secret.device_id;
         agent
             .complete_device_enrollment(api_base_url.clone(), device_id.clone(), secret.credential)
-            .map_err(command_error)?;
+            .map_err(|error| command_error("device_enrollment_failed", error))?;
         Ok(EnrolledDevice {
             device_id,
             name,
@@ -329,7 +409,7 @@ async fn desktop_device_enroll(
         })
     })
     .await
-    .map_err(command_error)?
+    .map_err(|error| command_error("device_enrollment_failed", error))?
 }
 
 #[derive(Clone)]
@@ -448,8 +528,29 @@ fn compensate_failed_web_ui_launch(agent: &AgentClient, task_id: &str, error: St
     }
 }
 
-fn command_error(error: impl std::fmt::Display) -> String {
-    error.to_string()
+fn command_error(code: &'static str, error: impl std::fmt::Display) -> DesktopCommandError {
+    DesktopCommandError {
+        code,
+        detail: error.to_string(),
+    }
+}
+
+fn auth_error_code(error: &AuthError) -> &'static str {
+    match error {
+        AuthError::CredentialUnavailable => "credential_unavailable",
+        AuthError::InvalidCredential => "invalid_credential",
+        AuthError::InvalidResponse => "invalid_auth_response",
+        AuthError::Rejected(_) => "auth_rejected",
+        AuthError::InvalidApiBase => "invalid_api_base",
+        AuthError::InvalidCallback => "invalid_callback",
+        AuthError::CallbackTimeout => "callback_timeout",
+        AuthError::BrowserUnavailable => "browser_unavailable",
+        AuthError::EndpointNotAllowed => "endpoint_not_allowed",
+        AuthError::ResponseTooLarge => "response_too_large",
+        AuthError::Transport => "auth_transport_failed",
+        AuthError::UnsupportedPlatform => "unsupported_platform",
+        AuthError::UnsupportedLocale => "unsupported_locale",
+    }
 }
 
 pub fn run() {
@@ -465,6 +566,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             agent_snapshot,
+            agent_set_locale,
             validate_development_applet,
             register_development_applet,
             install_signed_package,
@@ -601,6 +703,9 @@ fn launch_detached_agent(
             .env("AW_SIGNING_KEY_ID", key.key_id)
             .env("AW_SIGNING_PUBLIC_KEY", key.public_key);
     }
+    if let Some(key) = trusted_authorization_lease_key(app)? {
+        configure_authorization_lease_key_environment(&mut command, &key);
+    }
     command.env(
         "AW_DEVELOPER_MODE",
         if cfg!(debug_assertions) { "1" } else { "0" },
@@ -671,6 +776,91 @@ fn trusted_signing_key(app: &AppHandle) -> anyhow::Result<Option<TrustedSigningK
     let key = serde_json::from_slice(&fs::read(path).context("read trusted signing key")?)
         .context("parse trusted signing key")?;
     Ok(Some(key))
+}
+
+fn trusted_authorization_lease_key(app: &AppHandle) -> anyhow::Result<Option<TrustedSigningKey>> {
+    #[cfg(debug_assertions)]
+    {
+        let development_key = trusted_authorization_lease_key_pair(
+            optional_unicode_environment(AUTHORIZATION_LEASE_KEY_ID_ENV)?,
+            optional_unicode_environment(AUTHORIZATION_LEASE_PUBLIC_KEY_ENV)?,
+            "both authorization lease key development overrides are required",
+        )?;
+        if development_key.is_some() {
+            return Ok(development_key);
+        }
+    }
+
+    #[cfg(not(debug_assertions))]
+    {
+        let embedded_key = trusted_authorization_lease_key_pair(
+            option_env!("AW_AUTHORIZATION_LEASE_KEY_ID").map(str::to_owned),
+            option_env!("AW_AUTHORIZATION_LEASE_PUBLIC_KEY").map(str::to_owned),
+            "release build embedded an incomplete authorization lease key",
+        )?;
+        if embedded_key.is_some() {
+            return Ok(embedded_key);
+        }
+    }
+
+    let resource_directory = app
+        .path()
+        .resource_dir()
+        .context("resolve resource directory")?;
+    let path = resource_directory.join(AUTHORIZATION_LEASE_KEY_RESOURCE);
+    if !path.is_file() {
+        return Ok(None);
+    }
+    parse_trusted_authorization_lease_public_key(
+        &fs::read(path).context("read trusted authorization lease public key")?,
+    )
+}
+
+fn parse_trusted_authorization_lease_public_key(
+    contents: &[u8],
+) -> anyhow::Result<Option<TrustedSigningKey>> {
+    let key: TrustedSigningKey =
+        serde_json::from_slice(contents).context("parse trusted authorization lease public key")?;
+    trusted_authorization_lease_key_pair(
+        Some(key.key_id),
+        Some(key.public_key),
+        "trusted authorization lease key resource is incomplete",
+    )
+}
+
+fn optional_unicode_environment(name: &str) -> anyhow::Result<Option<String>> {
+    match std::env::var(name) {
+        Ok(value) => Ok(Some(value)),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            Err(anyhow!("{name} must contain valid Unicode text"))
+        }
+    }
+}
+
+fn trusted_authorization_lease_key_pair(
+    key_id: Option<String>,
+    public_key: Option<String>,
+    incomplete_message: &'static str,
+) -> anyhow::Result<Option<TrustedSigningKey>> {
+    match (key_id, public_key) {
+        (None, None) => Ok(None),
+        (Some(key_id), Some(public_key)) => {
+            let key_id = key_id.trim().to_owned();
+            let public_key = public_key.trim().to_owned();
+            if key_id.is_empty() || public_key.is_empty() {
+                return Err(anyhow!(incomplete_message));
+            }
+            Ok(Some(TrustedSigningKey { key_id, public_key }))
+        }
+        _ => Err(anyhow!(incomplete_message)),
+    }
+}
+
+fn configure_authorization_lease_key_environment(command: &mut Command, key: &TrustedSigningKey) {
+    command
+        .env(AUTHORIZATION_LEASE_KEY_ID_ENV, &key.key_id)
+        .env(AUTHORIZATION_LEASE_PUBLIC_KEY_ENV, &key.public_key);
 }
 
 #[cfg(windows)]
@@ -751,5 +941,110 @@ mod tests {
             serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
         assert_eq!(capability["windows"], serde_json::json!(["main"]));
         assert!(capability.get("webviews").is_none());
+    }
+
+    #[test]
+    fn locale_command_accepts_only_the_explicit_locale_contract() {
+        let input: SetLocaleInput = serde_json::from_value(serde_json::json!({
+            "locale": "zh-CN",
+            "fallbackLocales": ["en-US"]
+        }))
+        .unwrap();
+        assert_eq!(input.locale, "zh-CN");
+        assert_eq!(input.fallback_locales, vec!["en-US"]);
+
+        assert!(serde_json::from_value::<SetLocaleInput>(serde_json::json!({
+            "locale": "zh-CN",
+            "fallbackLocales": ["en-US"],
+            "accessToken": "must-not-cross"
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn authorization_lease_key_pair_requires_both_values() {
+        let error = trusted_authorization_lease_key_pair(
+            Some("lease-key-1".into()),
+            None,
+            "authorization lease key pair is incomplete",
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "authorization lease key pair is incomplete"
+        );
+
+        let error = trusted_authorization_lease_key_pair(
+            None,
+            Some("public-key".into()),
+            "authorization lease key pair is incomplete",
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "authorization lease key pair is incomplete"
+        );
+    }
+
+    #[test]
+    fn absent_authorization_lease_key_pair_keeps_agent_fail_closed() {
+        assert!(trusted_authorization_lease_key_pair(
+            None,
+            None,
+            "authorization lease key pair is incomplete",
+        )
+        .unwrap()
+        .is_none());
+    }
+
+    #[test]
+    fn authorization_lease_key_pair_is_forwarded_to_the_agent_command() {
+        let key = trusted_authorization_lease_key_pair(
+            Some(" lease-key-1 ".into()),
+            Some(" public-key ".into()),
+            "authorization lease key pair is incomplete",
+        )
+        .unwrap()
+        .unwrap();
+        let mut command = Command::new("unused-test-program");
+
+        configure_authorization_lease_key_environment(&mut command, &key);
+
+        let environment = command
+            .get_envs()
+            .map(|(name, value)| {
+                (
+                    name.to_string_lossy().into_owned(),
+                    value.map(|value| value.to_string_lossy().into_owned()),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        assert_eq!(
+            environment.get(AUTHORIZATION_LEASE_KEY_ID_ENV),
+            Some(&Some("lease-key-1".into()))
+        );
+        assert_eq!(
+            environment.get(AUTHORIZATION_LEASE_PUBLIC_KEY_ENV),
+            Some(&Some("public-key".into()))
+        );
+    }
+
+    #[test]
+    fn authorization_lease_public_key_resource_accepts_only_public_fields() {
+        let key = parse_trusted_authorization_lease_public_key(
+            br#"{"keyId":"lease-key-1","publicKey":"public-key"}"#,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(key.key_id, "lease-key-1");
+        assert_eq!(key.public_key, "public-key");
+
+        let error = parse_trusted_authorization_lease_public_key(
+            br#"{"keyId":"lease-key-1","publicKey":"public-key","privateKey":"must-not-load"}"#,
+        )
+        .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("parse trusted authorization lease public key"));
     }
 }

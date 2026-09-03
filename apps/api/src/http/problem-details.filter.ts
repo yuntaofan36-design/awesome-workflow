@@ -4,22 +4,25 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { ProblemDetails } from '@awesome-workflow/contracts';
 
 import { DomainError } from '../core/errors.js';
+import { negotiateLocale, problemDetail, problemTitle, setLanguageHeaders } from '../i18n/locale.js';
 
 @Catch()
 export class ProblemDetailsFilter implements ExceptionFilter {
   catch(error: unknown, host: ArgumentsHost): void {
     const response = host.switchToHttp().getResponse<FastifyReply>();
     const request = host.switchToHttp().getRequest<FastifyRequest>();
+    const locale = negotiateLocale(request.headers['accept-language']);
     const normalized = normalize(error);
     const problem: ProblemDetails = {
       type: `https://awesome-workflow.dev/problems/${normalized.code}`,
-      title: normalized.title,
+      title: problemTitle(locale, normalized.status),
       status: normalized.status,
-      detail: normalized.detail,
+      detail: problemDetail(locale, normalized.code, normalized.detail, normalized.status),
       instance: request.url,
       code: normalized.code,
       ...(normalized.errors === undefined ? {} : { errors: normalized.errors }),
     };
+    setLanguageHeaders(response, locale);
     response.header('content-type', 'application/problem+json').status(normalized.status).send(problem);
   }
 }
@@ -27,7 +30,6 @@ export class ProblemDetailsFilter implements ExceptionFilter {
 function normalize(error: unknown): {
   status: number;
   code: string;
-  title: string;
   detail?: string;
   errors?: unknown;
 } {
@@ -35,7 +37,6 @@ function normalize(error: unknown): {
     return {
       status: error.status,
       code: error.code,
-      title: titleFor(error.status),
       detail: error.message,
       errors: error.errors,
     };
@@ -47,34 +48,15 @@ function normalize(error: unknown): {
       return {
         status,
         code: body.code ?? 'http_error',
-        title: titleFor(status),
         detail: Array.isArray(body.message) ? body.message.join(', ') : (body.message ?? error.message),
         errors: body.errors,
       };
     }
-    return { status, code: 'http_error', title: titleFor(status), detail: String(response) };
+    return { status, code: 'http_error', detail: String(response) };
   }
   return {
     status: 500,
     code: 'internal_error',
-    title: 'Internal Server Error',
     detail: 'The server could not complete the request',
   };
 }
-
-const titleFor = (status: number) =>
-  status === 400
-    ? 'Bad Request'
-    : status === 401
-      ? 'Unauthorized'
-      : status === 403
-        ? 'Forbidden'
-        : status === 404
-          ? 'Not Found'
-          : status === 409
-            ? 'Conflict'
-            : status === 429
-              ? 'Too Many Requests'
-              : status >= 500
-                ? 'Internal Server Error'
-                : 'Request Failed';

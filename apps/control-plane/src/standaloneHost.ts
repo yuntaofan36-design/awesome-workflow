@@ -1,3 +1,5 @@
+import type { LocalePreference, LocaleSnapshot } from '@awesome-workflow/contracts';
+import { createLocaleSnapshot, detectBrowserLocale, writeLocalePreference } from '@awesome-workflow/i18n';
 import type {
   BrokerRequest,
   BrokerResult,
@@ -6,9 +8,55 @@ import type {
   HostEventName,
 } from '@awesome-workflow/web-sdk';
 
-export function createStandaloneHost(): HostApi {
+import type { StandaloneLocaleControls } from './i18n';
+
+const STANDALONE_LOCALE = Symbol('awesome-workflow.control-plane.standalone-locale');
+
+type StandaloneHost = HostApi & {
+  [STANDALONE_LOCALE]: StandaloneLocaleControls;
+};
+
+export function createStandaloneHost(): StandaloneHost {
   const listeners = new Map<HostEventName, Set<(payload: never) => void>>();
+  const storage = browserStorage();
+  const detected = detectBrowserLocale({
+    languages: navigator.languages,
+    storage,
+    timeZone: browserTimeZone(),
+  });
+  let preference = detected.preference;
+  let locale = detected.snapshot;
+
+  const emit = <TEvent extends HostEventName>(event: TEvent, payload: HostEventMap[TEvent]): void => {
+    listeners.get(event)?.forEach((listener) => listener(payload as never));
+  };
+  const refreshSystemLocale = (): void => {
+    if (preference !== 'system') return;
+    locale = createLocaleSnapshot('system', {
+      languages: navigator.languages,
+      timeZone: browserTimeZone(),
+    });
+    emit('locale.changed', locale);
+  };
+  window.addEventListener('languagechange', refreshSystemLocale);
+
+  const standaloneLocale: StandaloneLocaleControls = {
+    get preference() {
+      return preference;
+    },
+    setPreference: (nextPreference: LocalePreference) => {
+      preference = nextPreference;
+      writeLocalePreference(storage, preference);
+      locale = createLocaleSnapshot(preference, {
+        languages: navigator.languages,
+        timeZone: browserTimeZone(),
+      });
+      emit('locale.changed', locale);
+    },
+  };
+
   return {
+    [STANDALONE_LOCALE]: standaloneLocale,
     version: 1,
     broker: {
       request: async <TRequest extends BrokerRequest>(request: TRequest): Promise<BrokerResult<TRequest>> => {
@@ -35,6 +83,7 @@ export function createStandaloneHost(): HostApi {
         window.history[options?.replace ? 'replaceState' : 'pushState']({}, '', to);
       },
     },
+    locale: { getCurrent: async () => locale },
     route: {
       getCurrent: async () => ({
         hash: window.location.hash,
@@ -60,4 +109,20 @@ export function createStandaloneHost(): HostApi {
       }),
     },
   };
+}
+
+export function getStandaloneLocaleControls(host: HostApi): StandaloneLocaleControls | undefined {
+  return STANDALONE_LOCALE in host ? (host as StandaloneHost)[STANDALONE_LOCALE] : undefined;
+}
+
+function browserStorage(): Storage | undefined {
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+function browserTimeZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 }

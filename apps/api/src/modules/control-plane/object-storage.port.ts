@@ -23,7 +23,10 @@ export type SignedDownload = {
 
 export interface ObjectStoragePort {
   createUpload(declaration: StoredObjectDeclaration): Promise<SignedUpload>;
-  createDownload(key: string): Promise<SignedDownload>;
+  /** Private service-to-service URL. It must never be returned to a device. */
+  createWorkerDownload(key: string): Promise<SignedDownload>;
+  /** Browser/device reachable URL. It must never use Compose-only DNS. */
+  createDeviceDownload(key: string): Promise<SignedDownload>;
   assertUploaded(declaration: StoredObjectDeclaration): Promise<void>;
 }
 
@@ -43,7 +46,15 @@ export class MemoryObjectStorageAdapter implements ObjectStoragePort {
     };
   }
 
-  async createDownload(key: string): Promise<SignedDownload> {
+  async createWorkerDownload(key: string): Promise<SignedDownload> {
+    return this.createMemoryDownload(key);
+  }
+
+  async createDeviceDownload(key: string): Promise<SignedDownload> {
+    return this.createMemoryDownload(key);
+  }
+
+  private createMemoryDownload(key: string): SignedDownload {
     return {
       url: objectUrl(this.config.ARTIFACT_UPLOAD_BASE_URL, key),
       expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),

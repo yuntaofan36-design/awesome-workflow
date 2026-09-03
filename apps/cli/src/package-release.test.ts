@@ -53,6 +53,12 @@ test('package output is deterministic and uses separate valid manifest and artif
     const secondArchive = await readFile(join(secondOutput, secondArtifact.fileName));
     assert.deepEqual(firstArchive, secondArchive);
     assert.equal(firstArtifact.sha256, secondArtifact.sha256);
+    assert.equal(first.manifest.kind, 'web');
+    if (first.manifest.kind === 'web' && first.manifest.runtime === 'federation') {
+      assert.match(new URL(first.manifest.manifestUrl).pathname, new RegExp(first.manifest.integritySha256));
+      assert.equal(first.manifest.manifestUrl.includes('__AW_FEDERATION_SHA256__'), false);
+      assert.deepEqual(first.manifest.resourceOrigins, ['http://localhost:5173']);
+    }
 
     assert.equal(
       verify(

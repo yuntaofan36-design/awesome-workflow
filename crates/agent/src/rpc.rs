@@ -9,6 +9,7 @@ pub const RPC_PROTOCOL_VERSION: u16 = 1;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AgentMethod {
+    RunnerLaunchAuthorize,
     ContextRead,
     TaskLogAppend,
     TaskProgress,
@@ -22,7 +23,10 @@ pub enum AgentMethod {
 impl AgentMethod {
     pub fn is_granted_by(&self, capabilities: &[Capability]) -> bool {
         match self {
-            Self::ContextRead | Self::TaskLogAppend | Self::TaskProgress => true,
+            Self::RunnerLaunchAuthorize
+            | Self::ContextRead
+            | Self::TaskLogAppend
+            | Self::TaskProgress => true,
             Self::WorkspaceRead => capabilities.iter().any(Capability::grants_workspace_read),
             Self::WorkspaceWrite => capabilities.iter().any(Capability::grants_workspace_write),
             Self::HttpRequest => capabilities
@@ -58,4 +62,6 @@ pub struct HostTaskContext {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_directory: Option<PathBuf>,
     pub arguments: Vec<String>,
+    pub locale: String,
+    pub fallback_locales: Vec<String>,
 }

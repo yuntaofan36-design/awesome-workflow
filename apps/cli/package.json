@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@awesome-workflow/contracts": "workspace:*",
+    "@awesome-workflow/i18n": "workspace:*",
     "@awesome-workflow/manifest-schema": "workspace:*"
   },
   "devDependencies": {

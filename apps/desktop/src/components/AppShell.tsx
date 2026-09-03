@@ -1,7 +1,17 @@
 import type { ReactNode } from 'react';
 import { useEffect, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Avatar, Badge, Breadcrumb, Button, Layout, Menu, Space } from '@arco-design/web-react';
+import {
+  Alert,
+  Avatar,
+  Badge,
+  Breadcrumb,
+  Button,
+  Layout,
+  Menu,
+  Select,
+  Space,
+} from '@arco-design/web-react';
 import {
   IconCalendar,
   IconCode,
@@ -17,29 +27,25 @@ import {
 
 import {
   selectDesktopLoading,
+  selectDesktopError,
   selectRefreshDesktop,
   selectSnapshot,
   useDesktopStore,
 } from '@/stores/desktopStore';
+import { platformRoleLabel } from '@/i18n/domain';
+import { formatUiError } from '@/i18n/errors';
+import { useLocale } from '@/i18n/localeContext';
 import { selectCurrentUser, selectLogout, useSessionStore } from '@/stores/sessionStore';
 import { selectSidebarCollapsed, selectToggleSidebar, useWorkspaceStore } from '@/stores/workspaceStore';
+import { LocaleSyncStatus } from './LocaleSyncStatus';
 
 const { Header, Sider, Content } = Layout;
 type AppShellProps = {
   children: ReactNode;
 };
 
-const navigationItems = [
-  { key: '/dashboard', label: 'Host overview', icon: <IconHome /> },
-  { key: '/installed', label: 'Installed', icon: <IconDesktop /> },
-  { key: '/tasks', label: 'Runs & logs', icon: <IconExperiment /> },
-  { key: '/developer', label: 'Developer', icon: <IconCode /> },
-  { key: '/schedules', label: 'Schedules', icon: <IconCalendar /> },
-  { key: '/security', label: 'Trust center', icon: <IconSafe /> },
-  { key: '/updates', label: 'Desktop updates', icon: <IconCloudDownload /> },
-] as const;
-
 export function AppShell({ children }: AppShellProps) {
+  const { formatNumber, preference, setPreference, t } = useLocale();
   const location = useLocation();
   const navigate = useNavigate();
   const collapsed = useWorkspaceStore(selectSidebarCollapsed);
@@ -49,18 +55,31 @@ export function AppShell({ children }: AppShellProps) {
   const snapshot = useDesktopStore(selectSnapshot);
   const refresh = useDesktopStore(selectRefreshDesktop);
   const refreshing = useDesktopStore(selectDesktopLoading);
+  const desktopError = useDesktopStore(selectDesktopError);
+  const navigationItems = useMemo(
+    () => [
+      { key: '/dashboard', label: t('navigation.dashboard'), icon: <IconHome /> },
+      { key: '/installed', label: t('navigation.installed'), icon: <IconDesktop /> },
+      { key: '/tasks', label: t('navigation.tasks'), icon: <IconExperiment /> },
+      { key: '/developer', label: t('navigation.developer'), icon: <IconCode /> },
+      { key: '/schedules', label: t('navigation.schedules'), icon: <IconCalendar /> },
+      { key: '/security', label: t('navigation.security'), icon: <IconSafe /> },
+      { key: '/updates', label: t('navigation.updates'), icon: <IconCloudDownload /> },
+    ],
+    [t],
+  );
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  const displayName = currentUser?.displayName || currentUser?.email || 'Guest';
+  const displayName = currentUser?.displayName || currentUser?.email || t('app.guest');
   const avatarText = displayName.slice(0, 2).toUpperCase();
 
   const activeNavigationItem = useMemo(() => {
     const match = navigationItems.find((item) => location.pathname.startsWith(item.key));
     return match ?? navigationItems[0];
-  }, [location.pathname]);
+  }, [location.pathname, navigationItems]);
 
   const selectedKey = activeNavigationItem.key;
 
@@ -84,7 +103,7 @@ export function AppShell({ children }: AppShellProps) {
                 <br />
                 WORKFLOW
               </strong>
-              <small>DESKTOP HOST</small>
+              <small>{t('app.brandSubtitle')}</small>
             </div>
           )}
         </div>
@@ -107,7 +126,7 @@ export function AppShell({ children }: AppShellProps) {
         <Header className="desktop-header">
           <Space size={12}>
             <Button
-              aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+              aria-label={collapsed ? t('app.expandNavigation') : t('app.collapseNavigation')}
               icon={collapsed ? <IconMenuUnfold /> : <IconMenuFold />}
               shape="circle"
               type="text"
@@ -116,7 +135,7 @@ export function AppShell({ children }: AppShellProps) {
             <Breadcrumb className="min-w-0 text-sm">
               <Breadcrumb.Item>
                 <button type="button" className="breadcrumb-root" onClick={() => navigate('/dashboard')}>
-                  LOCAL CONTROL PLANE
+                  {t('app.localControlPlane')}
                 </button>
               </Breadcrumb.Item>
               <Breadcrumb.Item>{activeNavigationItem.label}</Breadcrumb.Item>
@@ -125,29 +144,65 @@ export function AppShell({ children }: AppShellProps) {
           <Space size={16}>
             <Badge
               status={snapshot?.sync.offline ? 'warning' : 'success'}
-              text={snapshot?.sync.offline ? 'OFFLINE' : `REV ${snapshot?.sync.revision ?? '—'}`}
+              text={
+                snapshot?.sync.offline
+                  ? t('app.offlineBadge')
+                  : t('app.revisionBadge', {
+                      revision:
+                        snapshot?.sync.revision === undefined ? '—' : formatNumber(snapshot.sync.revision),
+                    })
+              }
             >
               <span />
             </Badge>
             <Button
-              aria-label="Refresh agent"
+              aria-label={t('app.refreshAgent')}
               icon={<IconRefresh />}
               shape="circle"
               type="text"
               loading={refreshing}
               onClick={() => void refresh()}
             />
-            <button className="identity-button" type="button" onClick={() => void logout()} title="Sign out">
+            <Select
+              aria-label={t('locale.label')}
+              size="small"
+              style={{ width: 138 }}
+              value={preference}
+              onChange={(value) => {
+                if (value === 'system' || value === 'en-US' || value === 'zh-CN') {
+                  void setPreference(value);
+                }
+              }}
+              options={[
+                { label: t('locale.system'), value: 'system' },
+                { label: t('locale.enUS'), value: 'en-US' },
+                { label: t('locale.zhCN'), value: 'zh-CN' },
+              ]}
+            />
+            <LocaleSyncStatus />
+            <button
+              className="identity-button"
+              type="button"
+              onClick={() => void logout()}
+              title={t('app.signOut')}
+            >
               <Avatar size={30}>{avatarText}</Avatar>
               <span>
                 {displayName}
-                <small>{currentUser?.platformRoles[0]?.replace('_', ' ') ?? 'signed in'}</small>
+                <small>
+                  {currentUser?.platformRoles[0]
+                    ? platformRoleLabel(currentUser.platformRoles[0], t)
+                    : t('app.signedIn')}
+                </small>
               </span>
             </button>
           </Space>
         </Header>
         <Content className="desktop-content">
-          <div className="content-grid">{children}</div>
+          <div className="content-grid">
+            {desktopError && <Alert type="error" content={formatUiError(desktopError, t)} />}
+            {children}
+          </div>
         </Content>
       </Layout>
     </Layout>

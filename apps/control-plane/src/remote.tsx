@@ -1,10 +1,16 @@
 import { ConfigProvider } from '@arco-design/web-react';
+import arcoEnUS from '@arco-design/web-react/es/locale/en-US';
+import arcoZhCN from '@arco-design/web-react/es/locale/zh-CN';
+import type { LocaleSnapshot } from '@awesome-workflow/contracts';
+import { createLocaleSnapshot } from '@awesome-workflow/i18n';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { HostApi, MicroAppModule } from '@awesome-workflow/web-sdk';
 
 import { ControlPlaneApp } from './ControlPlaneApp';
+import { applyControlPlaneDocumentLocale, ControlPlaneI18nProvider, createControlPlaneI18n } from './i18n';
+import { getStandaloneLocaleControls } from './standaloneHost';
 import './arco-isolated.less';
 import './styles.css';
 
@@ -13,7 +19,11 @@ const mounts = new WeakMap<HTMLElement, MountRecord>();
 
 export async function mount(container: HTMLElement, host: HostApi): Promise<() => void> {
   unmount(container);
-  const initialPath = await resolveInitialPath(host);
+  const [initialPath, initialLocale] = await Promise.all([
+    resolveInitialPath(host),
+    resolveInitialLocale(host),
+  ]);
+  const i18n = await createControlPlaneI18n(initialLocale.locale);
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { refetchOnWindowFocus: false, retry: 1, staleTime: 20_000 },
@@ -28,16 +38,50 @@ export async function mount(container: HTMLElement, host: HostApi): Promise<() =
   mountRoot.append(surface, portalRoot);
   container.replaceChildren(mountRoot);
   const root = createRoot(surface);
-  root.render(
-    <StrictMode>
-      <ConfigProvider prefixCls="awcp" getPopupContainer={() => portalRoot}>
-        <QueryClientProvider client={queryClient}>
-          <ControlPlaneApp host={host} initialPath={initialPath} />
-        </QueryClientProvider>
-      </ConfigProvider>
-    </StrictMode>,
-  );
-  const cleanup = () => queryClient.clear();
+  const previousTitle = document.title;
+  const standaloneLocale = getStandaloneLocaleControls(host);
+  const ownsDocumentTitle = standaloneLocale !== undefined;
+  let currentLocale = initialLocale;
+  let disposed = false;
+  let appliedTitle = '';
+
+  const render = () => {
+    applyControlPlaneDocumentLocale(i18n, currentLocale, document, {
+      ownsTitle: ownsDocumentTitle,
+    });
+    if (ownsDocumentTitle) appliedTitle = document.title;
+    root.render(
+      <StrictMode>
+        <ControlPlaneI18nProvider value={{ instance: i18n, locale: currentLocale, standaloneLocale }}>
+          <ConfigProvider
+            prefixCls="awcp"
+            getPopupContainer={() => portalRoot}
+            locale={currentLocale.locale === 'zh-CN' ? arcoZhCN : arcoEnUS}
+          >
+            <QueryClientProvider client={queryClient}>
+              <ControlPlaneApp host={host} initialPath={initialPath} />
+            </QueryClientProvider>
+          </ConfigProvider>
+        </ControlPlaneI18nProvider>
+      </StrictMode>,
+    );
+  };
+  const unsubscribeLocale = host.events.on('locale.changed', (nextLocale) => {
+    void (async () => {
+      await i18n.changeLanguage(nextLocale.locale);
+      if (disposed) return;
+      currentLocale = nextLocale;
+      render();
+    })();
+  });
+  render();
+
+  const cleanup = () => {
+    disposed = true;
+    unsubscribeLocale();
+    queryClient.clear();
+    if (ownsDocumentTitle && document.title === appliedTitle) document.title = previousTitle;
+  };
   mounts.set(container, { cleanup, mountRoot, root });
   return () => unmount(container);
 }
@@ -64,5 +108,15 @@ async function resolveInitialPath(host: HostApi): Promise<string> {
     );
   } catch {
     return '/applications';
+  }
+}
+
+async function resolveInitialLocale(host: HostApi): Promise<LocaleSnapshot> {
+  try {
+    return await host.locale.getCurrent();
+  } catch {
+    return createLocaleSnapshot('en-US', {
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+    });
   }
 }

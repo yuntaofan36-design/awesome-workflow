@@ -5,7 +5,7 @@ import { loadPlatformConfig } from '@awesome-workflow/config';
 
 import { S3ObjectStorageAdapter } from './s3-object-storage.adapter.js';
 
-test('S3 adapter signs public uploads and internal worker downloads without network access', async () => {
+test('S3 adapter separates browser/device and internal Worker download audiences', async () => {
   const adapter = new S3ObjectStorageAdapter(
     loadPlatformConfig({
       NODE_ENV: 'test',
@@ -30,12 +30,24 @@ test('S3 adapter signs public uploads and internal worker downloads without netw
   assert.equal(uploadUrl.origin, 'https://uploads.example.test');
   assert.match(uploadUrl.pathname, /awesome-workflow-test\/objects\/sha256/);
   assert.ok(uploadUrl.searchParams.get('X-Amz-Signature'));
+  assert.equal(uploadUrl.searchParams.has('x-amz-checksum-sha256'), false);
+  assert.equal(uploadUrl.searchParams.has('x-amz-meta-aw-sha256'), false);
+  const signedHeaders = uploadUrl.searchParams.get('X-Amz-SignedHeaders')?.split(';') ?? [];
+  assert.ok(signedHeaders.includes('x-amz-checksum-sha256'));
+  assert.ok(signedHeaders.includes('x-amz-meta-aw-sha256'));
   assert.equal(upload.headers['x-amz-meta-aw-sha256'], sha256);
   assert.equal(upload.headers['x-amz-checksum-sha256'], Buffer.from(sha256, 'hex').toString('base64'));
 
-  const download = await adapter.createDownload('releases/release-id/example.awpkg');
-  const downloadUrl = new URL(download.url);
-  assert.equal(downloadUrl.origin, 'https://objects.internal.example.test');
-  assert.ok(downloadUrl.searchParams.get('X-Amz-Signature'));
-  assert.ok(Date.parse(download.expiresAt) > Date.now());
+  const workerDownload = await adapter.createWorkerDownload('releases/release-id/example.awpkg');
+  const workerDownloadUrl = new URL(workerDownload.url);
+  assert.equal(workerDownloadUrl.origin, 'https://objects.internal.example.test');
+  assert.ok(workerDownloadUrl.searchParams.get('X-Amz-Signature'));
+  assert.ok(Date.parse(workerDownload.expiresAt) > Date.now());
+
+  const deviceDownload = await adapter.createDeviceDownload('releases/release-id/example.awpkg');
+  const deviceDownloadUrl = new URL(deviceDownload.url);
+  assert.equal(deviceDownloadUrl.origin, 'https://uploads.example.test');
+  assert.ok(deviceDownloadUrl.searchParams.get('X-Amz-Signature'));
+  assert.ok(Date.parse(deviceDownload.expiresAt) > Date.now());
+  assert.notEqual(workerDownloadUrl.origin, deviceDownloadUrl.origin);
 });

@@ -10,6 +10,8 @@ import {
   WebCapabilitySchema,
 } from '@awesome-workflow/manifest-schema';
 
+import { ApplicationLocalizationsSchema, SupportedLocaleSchema } from './locale.js';
+
 const SlugSchema = ApplicationSlugSchema;
 const VersionSchema = SemanticVersionSchema;
 const HttpUrlSchema = z
@@ -31,6 +33,8 @@ export const WebAppSchema = z.object({
   slug: SlugSchema,
   name: z.string().min(2).max(80),
   summary: z.string().max(240),
+  defaultLocale: SupportedLocaleSchema.default('en-US'),
+  localizations: ApplicationLocalizationsSchema,
   runtime: WebRuntimeSchema,
   trust: z.enum(['trusted', 'sandboxed']),
   capabilities: z.array(WebCapabilitySchema),
@@ -55,6 +59,8 @@ export const CreateWebAppInputSchema = WebAppSchema.pick({
   slug: true,
   name: true,
   summary: true,
+  defaultLocale: true,
+  localizations: true,
   runtime: true,
   trust: true,
   capabilities: true,
@@ -90,6 +96,8 @@ export const DesktopAppSchema = z.object({
   slug: SlugSchema,
   name: z.string().min(2).max(80),
   summary: z.string().max(240),
+  defaultLocale: SupportedLocaleSchema.default('en-US'),
+  localizations: ApplicationLocalizationsSchema,
   activeRelease: z
     .object({
       id: z.string().uuid(),
@@ -110,6 +118,8 @@ export const CreateDesktopAppInputSchema = DesktopAppSchema.pick({
   slug: true,
   name: true,
   summary: true,
+  defaultLocale: true,
+  localizations: true,
 });
 export type CreateDesktopAppInput = z.infer<typeof CreateDesktopAppInputSchema>;
 

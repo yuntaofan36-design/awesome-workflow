@@ -1,4 +1,6 @@
-import type { CurrentUser, ReleaseChannel, Workspace } from '@awesome-workflow/contracts';
+import type { CurrentUser, LocaleSnapshot, ReleaseChannel, Workspace } from '@awesome-workflow/contracts';
+
+export type { LocaleSnapshot, SupportedLocale } from '@awesome-workflow/contracts';
 
 export const AW_BRIDGE_VERSION = 1 as const;
 export const AW_READY_MESSAGE = 'aw:bridge:ready' as const;
@@ -47,6 +49,7 @@ export type BrokerResult<TRequest extends BrokerRequest> = TRequest extends Cata
   : void;
 
 export type HostEventMap = {
+  'locale.changed': LocaleSnapshot;
   'route.changed': RouteSnapshot;
   'theme.changed': ThemeSnapshot;
   'workspace.changed': WorkspaceSummary;
@@ -68,6 +71,9 @@ export type HostApi = {
   };
   readonly navigation: {
     navigate: (to: string, options?: { replace?: boolean }) => Promise<void>;
+  };
+  readonly locale: {
+    getCurrent: () => Promise<LocaleSnapshot>;
   };
   readonly route: {
     getCurrent: () => Promise<RouteSnapshot>;
@@ -92,6 +98,7 @@ export type MicroAppModule = {
 
 export type BridgeMethod =
   | 'broker.request'
+  | 'locale.getCurrent'
   | 'navigation.navigate'
   | 'route.getCurrent'
   | 'theme.getCurrent'
@@ -264,6 +271,7 @@ function createBridge(port: MessagePort, requestTimeoutMs: number): HostApi {
     navigation: {
       navigate: (to, navigationOptions) => invoke('navigation.navigate', { options: navigationOptions, to }),
     },
+    locale: { getCurrent: () => invoke('locale.getCurrent') },
     route: { getCurrent: () => invoke('route.getCurrent') },
     theme: { getCurrent: () => invoke('theme.getCurrent') },
     user: { getSummary: () => invoke('user.getSummary') },
@@ -285,6 +293,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 const BRIDGE_METHODS: ReadonlySet<BridgeMethod> = new Set([
   'broker.request',
+  'locale.getCurrent',
   'navigation.navigate',
   'route.getCurrent',
   'theme.getCurrent',
@@ -293,6 +302,7 @@ const BRIDGE_METHODS: ReadonlySet<BridgeMethod> = new Set([
 ]);
 
 const HOST_EVENTS: ReadonlySet<HostEventName> = new Set([
+  'locale.changed',
   'route.changed',
   'theme.changed',
   'workspace.changed',

@@ -21,6 +21,7 @@ apps/
   cli                 aw developer and CI client
 packages/
   contracts           transport and domain contracts
+  i18n                shared locale resolution, persistence and formatting
   manifest-schema     versioned manifest schema and JSON Schema
   web-sdk             capability-limited Web host bridge
   desktop-sdk         task-scoped desktop application SDK
@@ -50,6 +51,35 @@ requirements for Tauri 2.
 Mailpit is a local SMTP fixture only. Production uses BFF-owned email OTP over
 TLS-protected SMTP plus Logto OIDC for explicitly enabled social Connectors,
 with HTTPS and managed secrets throughout.
+
+Administrator account/password login is enabled whenever
+`AUTH_PASSWORD_ADMIN_EMAIL` and `AUTH_PASSWORD_ADMIN_PASSWORD` are both set.
+The account receives the platform administrator role and signs in through the
+same HttpOnly BFF session as the other Web authentication methods. Keep both
+values in an untracked `.env` or deployment Secret; omitting both disables the
+Provider.
+
+## Internationalization
+
+The platform ships complete `en-US` and `zh-CN` catalogs. Web Shell, Control
+Plane, demo Web app, and Tauri UI support an explicit language or `system`,
+persist the preference locally, update Arco Design and `document.lang`, and
+format dates, numbers, and byte sizes with the resolved locale. Chinese system
+variants use the current `zh-CN` catalog until a separately translated
+Traditional Chinese catalog is added.
+
+API clients send `Accept-Language`; RFC Problem Details and login email are
+localized while their `code`, validation paths, and parameters remain stable.
+Publisher-authored application metadata uses `defaultLocale` plus optional
+`localizations`. Web micro-apps receive `locale.getCurrent()` and
+`locale.changed` through the capability-limited Host SDK.
+
+The desktop UI synchronizes its resolved locale to the persistent user Agent.
+Each new task freezes that snapshot in SQLite and passes it to Web UI, Python,
+and native applets as task context (`AW_LOCALE` and `AW_FALLBACK_LOCALES` for
+processes). Changing the UI language never changes a task already running.
+Protocol enums, Manifest keys, signature inputs, audit actions, and CLI JSON
+remain locale-independent.
 
 ## Core invariants
 

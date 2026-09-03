@@ -8,6 +8,11 @@ starting services or pulling images:
 docker compose --env-file .env.example -f infra/compose/docker-compose.yml config
 ```
 
+PostgreSQL, Redis, and both MinIO ports bind to `127.0.0.1` by default. They are
+development dependencies without a network-facing authentication boundary and
+must not be exposed on every host interface. Containers use the `aw-network`
+service names for internal access.
+
 Copy `.env.example` to `.env` and replace every `change-me` value before any
 future build or startup. The four application images use the targets `api`,
 `worker`, `web-shell`, and `control-plane` in
@@ -38,6 +43,15 @@ Replace `RELEASE_SIGNING_PUBLIC_KEYS` with a real public-key map before the
 Worker can validate releases. The placeholder is intentionally not a usable
 Ed25519 key.
 
+Set `AUTHORIZATION_LEASE_SIGNING_KEY_ID` together with a canonical Base64
+32-byte Ed25519 seed in `AUTHORIZATION_LEASE_SIGNING_PRIVATE_KEY`. The API uses
+that private seed only to sign bounded offline execution leases; Agents receive
+only the matching `AW_AUTHORIZATION_LEASE_KEY_ID` and raw Base64 public key.
+Schedule sync and run claim fail closed when the API signer or Agent trust key
+is absent. Rotate by distributing Agent trust first, then changing the API
+signing key id. `AUTHORIZATION_LEASE_TTL_SECONDS` defaults to 900 and is capped
+at 86400 seconds.
+
 ## Internal and public addresses
 
 - Containers administer MinIO through
@@ -49,11 +63,13 @@ Ed25519 key.
 - Browser uploads are presigned with `S3_PUBLIC_ENDPOINT`; API verification and
   Worker downloads are presigned with `S3_ENDPOINT`. Consequently the Worker
   allowlist contains the internal `http://minio:9000` origin.
-- `minio-bootstrap` keeps the bucket private and applies
-  `minio-cors.xml`, which permits the two checked-in local Web origins to use
-  presigned `PUT`, `GET`, and `HEAD` requests. If local Web ports or origins are
-  changed, update that explicit CORS file as well; a valid signature does not
-  bypass browser CORS.
+- `minio-bootstrap` keeps the bucket private. Current MinIO releases return
+  `NotImplemented` for bucket-level `PutBucketCors`, so the `minio` service sets
+  the explicit server-level `MINIO_API_CORS_ALLOW_ORIGIN` value instead. It
+  defaults to the two checked-in local Web origins; override it when local Web
+  origins change. The L3 infrastructure smoke sends a real browser preflight
+  and a presigned `PUT` with an `Origin` header because a valid signature does
+  not bypass browser CORS.
 - The same pattern is used for Logto: `logto` is container-only, while
   `logto.localhost` is the issuer visible to both browser and API. OIDC issuer
   identity must not be rewritten between internal and external URLs. A Compose

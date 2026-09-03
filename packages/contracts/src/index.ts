@@ -3,6 +3,7 @@ export * from './catalog.js';
 export * from './control-plane.js';
 export * from './desktop.js';
 export * from './jobs.js';
+export * from './locale.js';
 export * from './problem.js';
 export * from './workspace.js';
 

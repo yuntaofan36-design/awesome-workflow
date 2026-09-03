@@ -1,44 +1,51 @@
 import { useState } from 'react';
-import { Button, Drawer, Empty, Table, Tag } from '@arco-design/web-react';
+import { Button, Drawer, Empty, Message, Table, Tag } from '@arco-design/web-react';
 import { IconEye, IconStop } from '@arco-design/web-react/icon';
 
 import { desktopHost } from '@/services/desktopHost';
+import { taskStatusLabel } from '@/i18n/domain';
+import { formatUiError, normalizeUiError } from '@/i18n/errors';
+import { useLocale } from '@/i18n/localeContext';
 import { selectSnapshot, selectStopTask, useDesktopStore } from '@/stores/desktopStore';
 import type { DesktopTask } from '@/types';
 
 export function TasksPage() {
+  const { formatDateTime, formatNumber, t } = useLocale();
   const tasks = useDesktopStore(selectSnapshot)?.tasks ?? [];
   const stop = useDesktopStore(selectStopTask);
   const [log, setLog] = useState<{ taskId: string; text: string } | null>(null);
-  const openLog = async (taskId: string) => setLog({ taskId, text: await desktopHost.readTaskLog(taskId) });
+  const openLog = async (taskId: string) => {
+    try {
+      setLog({ taskId, text: await desktopHost.readTaskLog(taskId) });
+    } catch (error) {
+      Message.error(formatUiError(normalizeUiError(error, 'task_log_read_failed'), t));
+    }
+  };
 
   return (
     <section className="page-stack">
       <header className="page-lead">
         <div>
           <span>03</span>
-          <p>PROCESS LEDGER</p>
+          <p>{t('tasks.eyebrow')}</p>
         </div>
-        <h1>Runs & logs</h1>
-        <p>
-          Runner PIDs are subordinate to task leases. Stopping a task revokes the lease before any later host
-          call can succeed.
-        </p>
+        <h1>{t('tasks.title')}</h1>
+        <p>{t('tasks.description')}</p>
       </header>
       <div className="surface table-surface">
         <Table<DesktopTask>
           rowKey="taskId"
           data={tasks}
           pagination={false}
-          noDataElement={<Empty description="No local runs yet" />}
+          noDataElement={<Empty description={t('tasks.empty')} />}
           columns={[
             {
-              title: 'TASK',
+              title: t('tasks.columns.task'),
               dataIndex: 'taskId',
               render: (value) => <code>{String(value).slice(0, 8)}</code>,
             },
             {
-              title: 'APP / VERSION',
+              title: t('tasks.columns.appVersion'),
               render: (_, row) => (
                 <div>
                   <strong>{row.appId}</strong>
@@ -47,7 +54,7 @@ export function TasksPage() {
               ),
             },
             {
-              title: 'STATE',
+              title: t('tasks.columns.state'),
               dataIndex: 'status',
               render: (value) => (
                 <Tag
@@ -61,22 +68,27 @@ export function TasksPage() {
                           : 'gray'
                   }
                 >
-                  {String(value).toUpperCase()}
+                  {taskStatusLabel(value as DesktopTask['status'], t)}
                 </Tag>
               ),
             },
-            { title: 'PID', dataIndex: 'pid', render: (value) => value ?? '—' },
             {
-              title: 'STARTED',
+              title: 'PID',
+              dataIndex: 'pid',
+              render: (value) =>
+                typeof value === 'number' ? formatNumber(value, { useGrouping: false }) : '—',
+            },
+            {
+              title: t('tasks.columns.started'),
               dataIndex: 'startedAt',
-              render: (value) => new Date(Number(value) * 1000).toLocaleString(),
+              render: (value) => formatDateTime(Number(value) * 1000),
             },
             {
               title: '',
               render: (_, row) => (
                 <div className="row-actions">
                   <Button type="text" icon={<IconEye />} onClick={() => void openLog(row.taskId)}>
-                    Log
+                    {t('common.log')}
                   </Button>
                   {row.status === 'running' && (
                     <Button
@@ -85,7 +97,7 @@ export function TasksPage() {
                       icon={<IconStop />}
                       onClick={() => void stop(row.taskId)}
                     >
-                      Stop
+                      {t('common.stop')}
                     </Button>
                   )}
                 </div>
@@ -96,7 +108,7 @@ export function TasksPage() {
       </div>
       <Drawer
         width={680}
-        title={`TASK LOG / ${log?.taskId.slice(0, 8) ?? ''}`}
+        title={t('tasks.logTitle', { task: log?.taskId.slice(0, 8) ?? '' })}
         visible={Boolean(log)}
         onCancel={() => setLog(null)}
         footer={null}

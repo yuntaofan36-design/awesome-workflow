@@ -1,3 +1,5 @@
+import type { UiError } from '@/i18n/errors';
+
 export type UpdateDescriptor = {
   currentVersion: string;
   version: string;
@@ -22,7 +24,7 @@ export type DesktopUpdateState = {
   update: UpdateDescriptor | null;
   downloadedBytes: number;
   contentLength: number | null;
-  error: string | null;
+  error: UiError | null;
 };
 
 export type DesktopUpdateEvent =
@@ -34,7 +36,7 @@ export type DesktopUpdateEvent =
   | { type: 'download-finished' }
   | { type: 'install-started' }
   | { type: 'installed' }
-  | { type: 'failed'; error: string };
+  | { type: 'failed'; error: UiError };
 
 export function createInitialUpdateState(runtimeAvailable: boolean): DesktopUpdateState {
   return {

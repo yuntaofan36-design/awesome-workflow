@@ -4,10 +4,13 @@ import { SectionIntro, SignalBadge } from '@awesome-workflow/ui';
 import { useQuery } from '@tanstack/react-query';
 
 import { getProviders } from '../services/auth';
+import { LocalizedErrorAlert } from '../components/LocalizedErrorAlert';
+import { useI18n } from '../i18n/I18nProvider';
 import { selectSetThemePreference, selectThemePreference, useShellStore } from '../stores/shellStore';
 import { selectUser, useUserStore } from '../stores/userStore';
 
 export function SecurityPage() {
+  const { t } = useI18n();
   const user = useUserStore(selectUser);
   const workspace = useShellStore((state) => state.workspace);
   const themePreference = useShellStore(selectThemePreference);
@@ -17,55 +20,59 @@ export function SecurityPage() {
   return (
     <main className="shell-page security-page">
       <SectionIntro
-        eyebrow="System / Identity and access"
+        eyebrow={t('security.eyebrow')}
         title={
           <>
-            Identity is a host concern, <em>not a micro-app secret.</em>
+            {t('security.title')} <em>{t('security.titleEmphasis')}</em>
           </>
         }
-        description="The session remains in an HttpOnly cookie. Applications receive only the stable internal user summary exposed by Host API v1."
+        description={t('security.description')}
       />
       <section className="security-grid">
         <Card className="identity-card">
-          <span>CURRENT PRINCIPAL</span>
+          <span>{t('security.currentPrincipal')}</span>
           <div className="identity-card__mark">
             <IconSafe />
           </div>
           <h2>{user?.displayName}</h2>
           <p>{user?.email}</p>
-          <SignalBadge tone="success">{workspace?.role ?? 'unscoped'}</SignalBadge>
+          <SignalBadge tone="success">
+            {workspace ? t(`role.${workspace.role}`) : t('common.unscoped')}
+          </SignalBadge>
           <dl>
-            <dt>Session</dt>
+            <dt>{t('security.session')}</dt>
             <dd>HttpOnly / SameSite=Lax</dd>
-            <dt>Workspace role</dt>
-            <dd>{workspace?.role ?? 'none'}</dd>
-            <dt>Platform roles</dt>
-            <dd>{user?.platformRoles.join(', ') || 'none'}</dd>
-            <dt>Micro-app view</dt>
-            <dd>Summary only</dd>
+            <dt>{t('security.workspaceRole')}</dt>
+            <dd>{workspace ? t(`role.${workspace.role}`) : t('common.none')}</dd>
+            <dt>{t('security.platformRoles')}</dt>
+            <dd>
+              {user?.platformRoles.map((role) => t(`platformRole.${role}`)).join(', ') || t('common.none')}
+            </dd>
+            <dt>{t('security.microAppView')}</dt>
+            <dd>{t('security.summaryOnly')}</dd>
           </dl>
         </Card>
         <div className="provider-stack">
           <div className="section-row">
             <div>
-              <span>AUTH CONNECTORS</span>
-              <h2>Provider slots</h2>
+              <span>{t('security.authConnectors')}</span>
+              <h2>{t('security.providerSlots')}</h2>
             </div>
             <IconLock />
           </div>
           {providers.isPending ? (
             <Skeleton animation text={{ rows: 5 }} />
           ) : providers.isError ? (
-            <Alert type="error" content={providers.error.message} />
+            <LocalizedErrorAlert error={providers.error} />
           ) : (
             providers.data.map((provider) => (
               <article className="provider-row" key={provider.id}>
                 <div className="provider-row__glyph">
-                  {provider.id === 'email' ? <IconEmail /> : provider.label.slice(0, 1)}
+                  {provider.id === 'email' ? <IconEmail /> : t(provider.labelKey).slice(0, 1)}
                 </div>
                 <div>
-                  <strong>{provider.label}</strong>
-                  <small>{provider.protocol === 'oidc' ? 'OpenID Connect' : 'Email one-time code'}</small>
+                  <strong>{t(provider.labelKey)}</strong>
+                  <small>{t(`provider.protocol.${provider.protocol}`)}</small>
                 </div>
                 <SignalBadge
                   tone={
@@ -76,7 +83,7 @@ export function SecurityPage() {
                         : 'neutral'
                   }
                 >
-                  {provider.status}
+                  {t(`provider.status.${provider.status}`)}
                 </SignalBadge>
               </article>
             ))
@@ -85,27 +92,28 @@ export function SecurityPage() {
       </section>
       <section className="preference-row">
         <div>
-          <span>APPEARANCE</span>
-          <strong>Host theme</strong>
-          <p>Theme changes are broadcast as a safe Host API event.</p>
+          <span>{t('security.appearance')}</span>
+          <strong>{t('security.hostTheme')}</strong>
+          <p>{t('security.themeBroadcast')}</p>
         </div>
         <Select
+          aria-label={t('security.hostTheme')}
           value={themePreference}
           onChange={setThemePreference}
           options={[
-            { label: 'Light', value: 'light' },
-            { label: 'Dark', value: 'dark' },
-            { label: 'System', value: 'system' },
+            { label: t('theme.light'), value: 'light' },
+            { label: t('theme.dark'), value: 'dark' },
+            { label: t('theme.system'), value: 'system' },
           ]}
         />
       </section>
       <Alert
         type="info"
-        title="Provider extension contract"
-        content="Google, Feishu and WeChat will map external identities onto the same internal user ID. Business authorization remains independent from the login provider."
+        title={t('security.providerContract')}
+        content={t('security.providerContractBody')}
       />
       <Button className="security-backup" disabled>
-        Recovery codes · planned
+        {t('security.recoveryCodes')}
       </Button>
     </main>
   );

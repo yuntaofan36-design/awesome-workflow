@@ -24,11 +24,13 @@ use crate::{
         Database, InstallationReportOutboxEntry, RemoteRunCompletion, RemoteRunRecord,
         RunReportOutboxEntry,
     },
+    desktop_capability_hash,
     manifest::resolve_contained,
     now_unix,
     web_ui::{self, WebUiServerHandle},
-    AgentError, AgentResult, AppletManifest, ArtifactAttestation, Capability, HostTaskContext,
-    IssuedLease, LeaseAuthority, RpcEnvelope, RunMode, RuntimeKind, ScheduleDelta, ScheduleRecord,
+    AgentError, AgentResult, AppletManifest, ArtifactAttestation, AuthorizationLease,
+    AuthorizationLeaseVerifier, AuthorizationTaskKind, Capability, HostTaskContext, IssuedLease,
+    LeaseAuthority, RpcEnvelope, RunMode, RuntimeKind, ScheduleDelta, ScheduleRecord,
     ScheduleSnapshot, SignatureVerifier, SyncState, TargetPlatform,
 };
 
@@ -76,6 +78,57 @@ pub struct TaskRecord {
     pub log_path: PathBuf,
     pub started_at: u64,
     pub finished_at: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentLocaleSettings {
+    pub locale: String,
+    pub fallback_locales: Vec<String>,
+}
+
+impl Default for AgentLocaleSettings {
+    fn default() -> Self {
+        Self {
+            locale: "en-US".into(),
+            fallback_locales: Vec::new(),
+        }
+    }
+}
+
+impl AgentLocaleSettings {
+    pub fn new(locale: String, fallback_locales: Vec<String>) -> AgentResult<Self> {
+        let settings = Self {
+            locale,
+            fallback_locales,
+        };
+        settings.validate()?;
+        Ok(settings)
+    }
+
+    pub(crate) fn validate(&self) -> AgentResult<()> {
+        if !is_supported_locale(&self.locale) {
+            return Err(AgentError::AccessDenied(
+                "locale is not supported by this Agent".into(),
+            ));
+        }
+        if self.fallback_locales.len() > 2
+            || self
+                .fallback_locales
+                .iter()
+                .any(|locale| !is_supported_locale(locale) || locale == &self.locale)
+            || self
+                .fallback_locales
+                .iter()
+                .enumerate()
+                .any(|(index, locale)| self.fallback_locales[..index].contains(locale))
+        {
+            return Err(AgentError::AccessDenied(
+                "fallback locales are invalid".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -133,8 +186,19 @@ pub struct RunnerRequest {
     pub work_dir: PathBuf,
     pub log_path: PathBuf,
     pub python_runtime: Option<PathBuf>,
+    pub locale: String,
+    pub fallback_locales: Vec<String>,
     #[serde(default)]
     pub args: Vec<String>,
+}
+
+struct ServerExecutionAuthorization<'a> {
+    lease: &'a AuthorizationLease,
+    device_id: &'a str,
+    task_kind: AuthorizationTaskKind,
+    task_id: &'a str,
+    revision: u64,
+    verifier: &'a dyn AuthorizationLeaseVerifier,
 }
 
 #[derive(Clone)]
@@ -185,6 +249,16 @@ impl Agent {
             developer_mode: self.config.developer_mode,
             target: self.config.target,
         })
+    }
+
+    pub fn set_locale(
+        &self,
+        locale: String,
+        fallback_locales: Vec<String>,
+    ) -> AgentResult<AgentLocaleSettings> {
+        let settings = AgentLocaleSettings::new(locale, fallback_locales)?;
+        self.database.set_locale_settings(&settings)?;
+        Ok(settings)
     }
 
     pub fn prepare_device_enrollment(&self) -> AgentResult<DeviceEnrollmentPreparation> {
@@ -367,8 +441,54 @@ impl Agent {
         version: Option<&str>,
         args: Vec<String>,
     ) -> AgentResult<RunOutcome> {
+        self.run_internal(app_id, version, args, None)
+    }
+
+    #[allow(clippy::too_many_arguments)] // Keep every signed scope component explicit at the execution boundary.
+    pub(crate) fn run_server_authorized(
+        &self,
+        app_id: &str,
+        version: Option<&str>,
+        args: Vec<String>,
+        lease: &AuthorizationLease,
+        device_id: &str,
+        task_kind: AuthorizationTaskKind,
+        task_id: &str,
+        revision: u64,
+        verifier: &dyn AuthorizationLeaseVerifier,
+    ) -> AgentResult<RunOutcome> {
+        self.run_internal(
+            app_id,
+            version,
+            args,
+            Some(ServerExecutionAuthorization {
+                lease,
+                device_id,
+                task_kind,
+                task_id,
+                revision,
+                verifier,
+            }),
+        )
+    }
+
+    fn run_internal(
+        &self,
+        app_id: &str,
+        version: Option<&str>,
+        args: Vec<String>,
+        authorization: Option<ServerExecutionAuthorization<'_>>,
+    ) -> AgentResult<RunOutcome> {
         self.refresh_tasks()?;
         let installed = self.database.active_install(app_id, version)?;
+        let locale_settings = self.database.locale_settings()?;
+        if let Some(authorization) = &authorization {
+            verify_server_execution_authorization(
+                &installed,
+                authorization,
+                self.database.as_ref(),
+            )?;
+        }
         let running = self.database.tasks()?.into_iter().any(|task| {
             task.app_id == app_id && matches!(task.status.as_str(), "starting" | "running")
         });
@@ -388,12 +508,21 @@ impl Agent {
         } else {
             LEASE_TTL
         };
-        let lease = self.leases.issue(
-            &installed.manifest.app_id,
-            &task_id,
-            &installed.manifest.capabilities,
-            lease_ttl,
-        )?;
+        let lease = match &authorization {
+            Some(authorization) => self.leases.issue_authorized(
+                &installed.manifest.app_id,
+                &task_id,
+                &installed.manifest.capabilities,
+                lease_ttl,
+                authorization.lease,
+            )?,
+            None => self.leases.issue(
+                &installed.manifest.app_id,
+                &task_id,
+                &installed.manifest.capabilities,
+                lease_ttl,
+            )?,
+        };
         let mut task = TaskRecord {
             task_id: task_id.clone(),
             app_id: installed.manifest.app_id.clone(),
@@ -408,7 +537,8 @@ impl Agent {
         if matches!(&runtime.runtime, RuntimeKind::WebUi { .. }) {
             let entry_path = resolve_contained(&installed.install_path, runtime.entry())?;
             task.status = "running".into();
-            self.database.insert_task(&task)?;
+            self.database
+                .insert_task_with_locale(&task, &locale_settings)?;
             let (server, launch_url) = match web_ui::start(
                 self.web_ui_server_agent(),
                 &installed.install_path,
@@ -451,23 +581,70 @@ impl Agent {
             work_dir: task_dir.clone(),
             log_path: log_path.clone(),
             python_runtime: self.config.python_runtime.clone(),
+            locale: locale_settings.locale.clone(),
+            fallback_locales: locale_settings.fallback_locales.clone(),
             args,
         };
         let request_path = task_dir.join("runner-request.json");
-        fs::write(&request_path, serde_json::to_vec_pretty(&request)?)?;
+        self.database
+            .insert_task_with_locale(&task, &locale_settings)?;
+        let encoded_request = match serde_json::to_vec_pretty(&request) {
+            Ok(encoded) => encoded,
+            Err(error) => {
+                let _ = self
+                    .database
+                    .update_task(&task.task_id, "failed", Some(now_unix()));
+                let _ = self.database.revoke_task_leases(&task.task_id);
+                return Err(error.into());
+            }
+        };
+        if let Err(error) = fs::write(&request_path, encoded_request) {
+            let _ = self
+                .database
+                .update_task(&task.task_id, "failed", Some(now_unix()));
+            let _ = self.database.revoke_task_leases(&task.task_id);
+            return Err(error.into());
+        }
         let mut command = Command::new(&self.config.runner_path);
         command.arg("--request").arg(&request_path).env_clear();
         copy_runner_environment(&mut command);
-        let child = command
-            .spawn()
-            .map_err(|error| AgentError::Runner(error.to_string()))?;
+        let mut child = match command.spawn() {
+            Ok(child) => child,
+            Err(error) => {
+                let _ = fs::remove_file(&request_path);
+                let _ = self
+                    .database
+                    .update_task(&task.task_id, "failed", Some(now_unix()));
+                let _ = self.database.revoke_task_leases(&task.task_id);
+                return Err(AgentError::Runner(error.to_string()));
+            }
+        };
         task.pid = Some(child.id());
         task.status = "running".into();
-        self.database.insert_task(&task)?;
-        self.children
-            .lock()
-            .map_err(|_| AgentError::State("runner lock was poisoned".into()))?
-            .insert(task_id, child);
+        if let Err(error) = self.database.mark_task_running(&task.task_id, child.id()) {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = fs::remove_file(&request_path);
+            let _ = self
+                .database
+                .update_task(&task.task_id, "failed", Some(now_unix()));
+            let _ = self.database.revoke_task_leases(&task.task_id);
+            return Err(error);
+        }
+        let mut children = match self.children.lock() {
+            Ok(children) => children,
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = fs::remove_file(&request_path);
+                let _ = self
+                    .database
+                    .update_task(&task.task_id, "failed", Some(now_unix()));
+                let _ = self.database.revoke_task_leases(&task.task_id);
+                return Err(AgentError::State("runner lock was poisoned".into()));
+            }
+        };
+        children.insert(task_id, child);
         Ok(RunOutcome::Process { task, lease })
     }
 
@@ -519,6 +696,47 @@ impl Agent {
         self.leases.authorize(envelope)
     }
 
+    pub(crate) fn authorize_runner_launch<T>(
+        &self,
+        envelope: &RpcEnvelope<T>,
+        verifier: &dyn AuthorizationLeaseVerifier,
+    ) -> AgentResult<()> {
+        let local = self.leases.authorized_record(envelope)?;
+        let task = self.database.task(&local.task_id)?;
+        if task.app_id != local.app_id || !matches!(task.status.as_str(), "starting" | "running") {
+            return Err(AgentError::AccessDenied(
+                "Runner launch task is no longer active".into(),
+            ));
+        }
+        let Some(server) = local.authorization_lease.as_ref() else {
+            return Ok(());
+        };
+        if task.version != server.claims.version {
+            return Err(AgentError::AccessDenied(
+                "Runner launch task version does not match its authorization lease".into(),
+            ));
+        }
+        let control_plane =
+            load_control_plane_config(&self.config.data_root)?.ok_or_else(|| {
+                AgentError::AccessDenied(
+                    "server-authorized Runner launch requires an enrolled device".into(),
+                )
+            })?;
+        let installed = self
+            .database
+            .active_install(&local.app_id, Some(&server.claims.version))?;
+        let device_id = control_plane.device_id().to_string();
+        let authorization = ServerExecutionAuthorization {
+            lease: server,
+            device_id: &device_id,
+            task_kind: server.claims.task.kind,
+            task_id: &server.claims.task.id,
+            revision: server.claims.revision,
+            verifier,
+        };
+        verify_server_execution_authorization(&installed, &authorization, self.database.as_ref())
+    }
+
     pub fn rpc_capabilities<T>(&self, envelope: &RpcEnvelope<T>) -> AgentResult<Vec<Capability>> {
         self.leases.authorized_capabilities(envelope)
     }
@@ -544,12 +762,15 @@ impl Agent {
             .parent()
             .map(Path::to_path_buf)
             .ok_or_else(|| AgentError::PathEscape(task.log_path.display().to_string()))?;
+        let locale_settings = self.database.task_locale(task_id)?;
         Ok(HostTaskContext {
             app_id: task.app_id,
             task_id: task.task_id,
             work_directory,
             workspace_directory: None,
             arguments: Vec::new(),
+            fallback_locales: locale_settings.fallback_locales,
+            locale: locale_settings.locale,
         })
     }
 
@@ -600,7 +821,39 @@ impl Agent {
             .apply_schedule_snapshot(snapshot, crate::now_unix_ms())
     }
 
+    pub(crate) fn apply_control_plane_schedule_snapshot(
+        &self,
+        snapshot: &ScheduleSnapshot,
+        device_id: &str,
+        verifier: &dyn AuthorizationLeaseVerifier,
+    ) -> AgentResult<bool> {
+        let current = self.database.sync_state()?.revision;
+        if snapshot.revision < current {
+            return Err(AgentError::AccessDenied(
+                "authorization schedule snapshot is a revision downgrade".into(),
+            ));
+        }
+        for schedule in &snapshot.schedules {
+            self.verify_schedule_authorization(schedule, device_id, verifier, false)?;
+        }
+        self.database
+            .apply_schedule_snapshot(snapshot, crate::now_unix_ms())
+    }
+
     pub fn apply_schedule_delta(&self, delta: &ScheduleDelta) -> AgentResult<bool> {
+        self.database
+            .apply_schedule_delta(delta, crate::now_unix_ms())
+    }
+
+    pub(crate) fn apply_control_plane_schedule_delta(
+        &self,
+        delta: &ScheduleDelta,
+        device_id: &str,
+        verifier: &dyn AuthorizationLeaseVerifier,
+    ) -> AgentResult<bool> {
+        for schedule in &delta.upserts {
+            self.verify_schedule_authorization(schedule, device_id, verifier, false)?;
+        }
         self.database
             .apply_schedule_delta(delta, crate::now_unix_ms())
     }
@@ -776,13 +1029,135 @@ impl Agent {
         self.database.claim_due_schedules(now)
     }
 
+    pub(crate) fn claim_authorized_due_schedules(
+        &self,
+        now: u64,
+        device_id: &str,
+        verifier: &dyn AuthorizationLeaseVerifier,
+    ) -> AgentResult<Vec<ScheduleRecord>> {
+        let schedules = self.database.claim_due_schedules(now)?;
+        Ok(schedules
+            .into_iter()
+            .filter(|schedule| {
+                self.verify_schedule_authorization(schedule, device_id, verifier, true)
+                    .is_ok()
+            })
+            .collect())
+    }
+
+    fn verify_schedule_authorization(
+        &self,
+        schedule: &ScheduleRecord,
+        device_id: &str,
+        verifier: &dyn AuthorizationLeaseVerifier,
+        require_installed_capabilities: bool,
+    ) -> AgentResult<()> {
+        schedule.validate()?;
+        let lease = schedule.authorization_lease.as_ref().ok_or_else(|| {
+            AgentError::AccessDenied("schedule has no server authorization lease".into())
+        })?;
+        verifier.verify(lease)?;
+        let authorization_now = self.database.authorization_time(crate::now_unix_ms())?;
+        let capability_hash = match self
+            .database
+            .active_install(&schedule.app_id, schedule.version.as_deref())
+        {
+            Ok(installed) => desktop_capability_hash(&installed.manifest.capabilities)?,
+            Err(AgentError::NotInstalled(_, _)) if !require_installed_capabilities => {
+                lease.claims.capability_hash.clone()
+            }
+            Err(error) => return Err(error),
+        };
+        lease.validate_scope(
+            device_id,
+            &schedule.app_id,
+            schedule.version.as_deref().unwrap_or(&lease.claims.version),
+            AuthorizationTaskKind::Schedule,
+            &schedule.schedule_id,
+            schedule.revision,
+            &capability_hash,
+            authorization_now,
+        )
+    }
+
+    #[cfg(test)]
     pub(crate) fn record_remote_claim(&self, claim: &RunClaim) -> AgentResult<bool> {
         self.database
             .record_remote_claim(claim, crate::now_unix_ms())
     }
 
-    pub(crate) fn pending_remote_runs(&self) -> AgentResult<Vec<RemoteRunRecord>> {
-        self.database.pending_remote_runs()
+    pub(crate) fn record_authorized_remote_claim(
+        &self,
+        claim: &RunClaim,
+        device_id: &str,
+        verifier: &dyn AuthorizationLeaseVerifier,
+    ) -> AgentResult<bool> {
+        claim.validate()?;
+        let lease = claim.authorization_lease.as_ref().ok_or_else(|| {
+            AgentError::AccessDenied("run claim has no server authorization lease".into())
+        })?;
+        verifier.verify(lease)?;
+        let authorization_now = self.database.authorization_time(crate::now_unix_ms())?;
+        let installed = self
+            .database
+            .active_install(&claim.app_id, Some(&claim.version))?;
+        let capability_hash = desktop_capability_hash(&installed.manifest.capabilities)?;
+        lease.validate_scope(
+            device_id,
+            &claim.app_id,
+            &claim.version,
+            AuthorizationTaskKind::Run,
+            &claim.run_id,
+            claim.attempt,
+            &capability_hash,
+            authorization_now,
+        )?;
+        self.database
+            .record_remote_claim(claim, crate::now_unix_ms())
+    }
+
+    pub(crate) fn pending_authorized_remote_runs(
+        &self,
+        device_id: &str,
+        verifier: &dyn AuthorizationLeaseVerifier,
+    ) -> AgentResult<Vec<RemoteRunRecord>> {
+        let mut authorized = Vec::new();
+        for remote in self.database.pending_remote_runs()? {
+            let Some(lease) = &remote.authorization_lease else {
+                continue;
+            };
+            let installed = match self
+                .database
+                .active_install(&remote.app_id, Some(&remote.version))
+            {
+                Ok(installed) => installed,
+                Err(_) => continue,
+            };
+            let capability_hash = desktop_capability_hash(&installed.manifest.capabilities)?;
+            if verifier.verify(lease).is_ok()
+                && remote
+                    .authorization_intent_hash()
+                    .is_ok_and(|intent_hash| intent_hash == lease.claims.intent_hash)
+            {
+                let authorization_now = self.database.authorization_time(crate::now_unix_ms())?;
+                if lease
+                    .validate_scope(
+                        device_id,
+                        &remote.app_id,
+                        &remote.version,
+                        AuthorizationTaskKind::Run,
+                        &remote.run_id,
+                        remote.attempt,
+                        &capability_hash,
+                        authorization_now,
+                    )
+                    .is_ok()
+                {
+                    authorized.push(remote);
+                }
+            }
+        }
+        Ok(authorized)
     }
 
     pub(crate) fn bind_remote_task_and_enqueue_running(
@@ -914,6 +1289,30 @@ impl Agent {
         }
         Ok(())
     }
+}
+
+fn is_supported_locale(locale: &str) -> bool {
+    matches!(locale, "en-US" | "zh-CN")
+}
+
+fn verify_server_execution_authorization(
+    installed: &InstalledApplet,
+    authorization: &ServerExecutionAuthorization<'_>,
+    database: &Database,
+) -> AgentResult<()> {
+    authorization.verifier.verify(authorization.lease)?;
+    let authorization_now = database.authorization_time(crate::now_unix_ms())?;
+    let capability_hash = desktop_capability_hash(&installed.manifest.capabilities)?;
+    authorization.lease.validate_scope(
+        authorization.device_id,
+        &installed.manifest.app_id,
+        &installed.manifest.version.to_string(),
+        authorization.task_kind,
+        authorization.task_id,
+        authorization.revision,
+        &capability_hash,
+        authorization_now,
+    )
 }
 
 fn validate_extracted_release(
@@ -1107,6 +1506,66 @@ mod tests {
     }
 
     #[test]
+    fn restart_revokes_starting_and_running_leases_and_rejects_old_runner_launches() {
+        let directory = tempdir().unwrap();
+        let data_root = directory.path().join("agent");
+        let config = AgentConfig {
+            data_root: data_root.clone(),
+            runner_path: "missing-runner".into(),
+            rpc_endpoint: "local://test".into(),
+            python_runtime: None,
+            target: TargetPlatform::WINDOWS_X64,
+            developer_mode: false,
+        };
+        let agent = Agent::open(config.clone()).unwrap();
+        let mut old_launches = Vec::new();
+        for status in ["starting", "running"] {
+            let task_id = Uuid::new_v4().to_string();
+            agent
+                .database
+                .insert_task(&TaskRecord {
+                    task_id: task_id.clone(),
+                    app_id: "restart-test".into(),
+                    version: "1.0.0".into(),
+                    status: status.into(),
+                    pid: (status == "running").then_some(42),
+                    log_path: data_root.join("tasks").join(&task_id).join("task.log"),
+                    started_at: now_unix(),
+                    finished_at: None,
+                })
+                .unwrap();
+            let lease = agent
+                .leases
+                .issue("restart-test", &task_id, &[], LEASE_TTL)
+                .unwrap();
+            let launch = RpcEnvelope {
+                protocol_version: crate::RPC_PROTOCOL_VERSION,
+                app_id: "restart-test".into(),
+                task_id,
+                lease: lease.value,
+                method: crate::AgentMethod::RunnerLaunchAuthorize,
+                payload: (),
+            };
+            agent
+                .authorize_runner_launch(&launch, &crate::RejectAuthorizationLeases)
+                .unwrap();
+            old_launches.push(launch);
+        }
+        drop(agent);
+
+        let reopened = Agent::open(config).unwrap();
+        for launch in old_launches {
+            let task = reopened.database.task(&launch.task_id).unwrap();
+            assert_eq!(task.status, "failed");
+            assert!(task.finished_at.is_some());
+            assert!(matches!(
+                reopened.authorize_runner_launch(&launch, &crate::RejectAuthorizationLeases),
+                Err(AgentError::AccessDenied(_))
+            ));
+        }
+    }
+
+    #[test]
     fn installation_snapshot_reports_downloading_before_atomic_install_and_revision_commit() {
         let directory = tempdir().unwrap();
         let package = directory.path().join("synced.awpkg");
@@ -1141,6 +1600,8 @@ mod tests {
             kind: ManifestKind::Desktop,
             name: "Synced app".into(),
             description: "Control-plane installation test".into(),
+            default_locale: "en-US".into(),
+            localizations: Default::default(),
             runtimes: vec![RuntimeSpec {
                 platform: TargetPlatform::WINDOWS_X64,
                 artifact: "windows-x64".into(),
@@ -1250,6 +1711,7 @@ mod tests {
                 version: "1.0.0".into(),
                 args: vec![],
                 requires_elevation: false,
+                authorization_lease: None,
             })
             .unwrap();
 
@@ -1336,6 +1798,7 @@ mod tests {
                 version: "1.0.0".into(),
                 args: vec![],
                 requires_elevation: true,
+                authorization_lease: None,
             })
             .unwrap();
         let control = RunControl {
@@ -1377,6 +1840,8 @@ mod tests {
             kind: ManifestKind::Desktop,
             name: "Rollback".into(),
             description: String::new(),
+            default_locale: "en-US".into(),
+            localizations: Default::default(),
             runtimes: vec![RuntimeSpec {
                 platform: TargetPlatform::WINDOWS_X64,
                 artifact: "runtime".into(),

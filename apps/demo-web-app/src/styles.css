@@ -1,5 +1,6 @@
 :root {
-  font-family: Bahnschrift, 'Aptos Narrow', sans-serif;
+  font-family:
+    Bahnschrift, 'Aptos Narrow', 'Microsoft YaHei UI', 'PingFang SC', 'Noto Sans CJK SC', sans-serif;
   color: #f3f4e9;
   background: #131713;
   font-synthesis: none;

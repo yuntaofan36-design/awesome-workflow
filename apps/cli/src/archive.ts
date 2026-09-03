@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { lstat, readFile, readdir, realpath } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 
+import { cliText } from './i18n.js';
 import { CliError } from './safety.js';
 
 export type ArchiveEntry = {
@@ -13,7 +14,7 @@ export async function collectArchiveEntries(root: string): Promise<ArchiveEntry[
   const absoluteRoot = await realpath(resolve(root));
   const entries: ArchiveEntry[] = [];
   await walk(absoluteRoot, absoluteRoot, entries);
-  if (!entries.length) throw new CliError('Package input directory does not contain any regular files.');
+  if (!entries.length) throw new CliError(cliText('archive.empty'));
   return entries;
 }
 
@@ -29,11 +30,11 @@ export function buildDeterministicZip(input: readonly ArchiveEntry[]): Buffer {
     })
     .sort((left, right) => compareNames(left.name, right.name));
 
-  if (entries.length > 0xffff) throw new CliError('ZIP64 is not supported; package contains too many files.');
+  if (entries.length > 0xffff) throw new CliError(cliText('archive.tooManyFiles'));
   const foldedNames = new Set<string>();
   for (const entry of entries) {
     const folded = entry.name.toLocaleLowerCase('en-US');
-    if (foldedNames.has(folded)) throw new CliError('Package contains duplicate cross-platform paths.');
+    if (foldedNames.has(folded)) throw new CliError(cliText('archive.duplicatePath'));
     foldedNames.add(folded);
   }
 
@@ -76,7 +77,7 @@ export function buildDeterministicZip(input: readonly ArchiveEntry[]): Buffer {
     central.writeUInt32LE(offset, 42);
     centralParts.push(central, entry.nameBytes);
     offset += local.length + entry.nameBytes.length + entry.bytes.length;
-    if (offset > 0xffffffff) throw new CliError('ZIP64 is not supported; package exceeds 4 GiB.');
+    if (offset > 0xffffffff) throw new CliError(cliText('archive.tooLarge'));
   }
 
   const centralSize = centralParts.reduce((size, part) => size + part.length, 0);
@@ -94,8 +95,8 @@ export function buildDeterministicZip(input: readonly ArchiveEntry[]): Buffer {
 
 export function assertPackableEntry(name: string, kind: 'file' | 'symbolic-link' | 'other'): void {
   assertSafeArchivePath(name);
-  if (kind === 'symbolic-link') throw new CliError(`Package input contains a symbolic link: ${name}`);
-  if (kind !== 'file') throw new CliError(`Package input contains a non-regular file: ${name}`);
+  if (kind === 'symbolic-link') throw new CliError(cliText('archive.symbolicLink', { name }));
+  if (kind !== 'file') throw new CliError(cliText('archive.nonRegular', { name }));
 }
 
 export function assertSafeArchivePath(name: string): void {
@@ -106,19 +107,19 @@ export function assertSafeArchivePath(name: string): void {
     name.startsWith('/') ||
     /^[A-Za-z]:/.test(name)
   ) {
-    throw new CliError('Archive entry contains an absolute or invalid path.');
+    throw new CliError(cliText('archive.invalidPath'));
   }
   const components = name.split('/').filter(Boolean);
   if (!components.length || components.some((component) => component === '.' || component === '..')) {
-    throw new CliError('Archive entry escapes its extraction root.');
+    throw new CliError(cliText('archive.pathEscape'));
   }
   for (const component of components) {
     if (component.includes(':') || /[. ]$/.test(component)) {
-      throw new CliError('Archive entry is unsafe on Windows.');
+      throw new CliError(cliText('archive.windowsUnsafe'));
     }
     const stem = component.split('.')[0]!.toUpperCase();
     if (/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/.test(stem)) {
-      throw new CliError('Archive entry uses a reserved Windows device name.');
+      throw new CliError(cliText('archive.windowsReserved'));
     }
   }
 }

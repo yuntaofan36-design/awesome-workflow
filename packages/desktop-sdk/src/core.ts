@@ -1,3 +1,5 @@
+import type { SupportedLocale } from '@awesome-workflow/contracts';
+
 export const DESKTOP_RPC_PROTOCOL_VERSION = 1 as const;
 
 export type DesktopTaskContext = {
@@ -7,6 +9,8 @@ export type DesktopTaskContext = {
   lease: string;
   rpcEndpoint: string;
   workDirectory: string;
+  locale: SupportedLocale;
+  fallbackLocales: SupportedLocale[];
 };
 
 export type DesktopRpcMethod =
@@ -51,6 +55,8 @@ export type HostTaskContext = {
   workDirectory: string;
   workspaceDirectory?: string;
   arguments: string[];
+  locale: SupportedLocale;
+  fallbackLocales: SupportedLocale[];
 };
 
 export type WorkspaceReadRequest = {

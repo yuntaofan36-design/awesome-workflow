@@ -46,6 +46,10 @@ export type AppletManifest = {
   kind: 'desktop';
   name: string;
   description: string;
+  defaultLocale: 'en-US' | 'zh-CN';
+  localizations?: Partial<
+    Record<'en-US' | 'zh-CN', { name?: string; summary?: string; description?: string }>
+  >;
   runtimes: DesktopRuntime[];
   dependencies: Array<
     | { kind: 'python'; version: string; lockArtifact: string }
@@ -106,28 +110,3 @@ export type CurrentUser = {
   displayName: string;
   platformRoles: Array<'platform_admin' | 'official_reviewer'>;
 };
-
-export function capabilityLabel(capability: DesktopCapability): string {
-  switch (capability.kind) {
-    case 'filesystem':
-      return `files:${capability.access}`;
-    case 'network':
-      return `network:${capability.domains.length}`;
-    case 'clipboard':
-      return `clipboard:${capability.access}`;
-    case 'shortcut':
-      return `shortcuts:${capability.accelerators.length}`;
-    case 'background':
-      return `background:${capability.modes.join('+')}`;
-    case 'lifecycle':
-      return `lifecycle:${capability.elevation}`;
-    case 'subprocess':
-      return `subprocess:${capability.executables.length}`;
-    case 'notifications':
-      return 'notifications';
-  }
-}
-
-export function platformLabel(platform: DesktopPlatform): string {
-  return `${platform.os}-${platform.arch}`;
-}

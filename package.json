@@ -27,7 +27,12 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
-    "check:rust": "cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace"
+    "check:rust": "cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
+    "test:l3": "pwsh -NoLogo -NoProfile -File ./scripts/l3.ps1",
+    "test:l3:infra": "pwsh -NoLogo -NoProfile -File ./scripts/l3.ps1 -InfrastructureOnly",
+    "test:l3:web-csp": "pwsh -NoLogo -NoProfile -File ./scripts/l3.ps1 -WebCspOnly",
+    "test:l3:desktop-preflight": "pwsh -NoLogo -NoProfile -File ./scripts/l3.ps1 -DesktopOnly",
+    "test:l3:tauri-process": "pwsh -NoLogo -NoProfile -File ./scripts/l3.ps1 -DesktopOnly -TauriProcessSmoke"
   },
   "devDependencies": {
     "@changesets/cli": "^2.29.5",

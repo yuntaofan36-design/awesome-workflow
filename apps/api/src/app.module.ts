@@ -23,6 +23,7 @@ import {
 } from './modules/auth/rate-limit.adapters.js';
 import { ControlPlaneController } from './modules/control-plane/control-plane.controller.js';
 import { ControlPlaneService } from './modules/control-plane/control-plane.service.js';
+import { AuthorizationLeaseIssuer } from './modules/control-plane/authorization-lease.issuer.js';
 import manifestSchema from './manifest.generated.json' with { type: 'json' };
 import openApiDocument from './openapi.generated.json' with { type: 'json' };
 import { MemoryObjectStorageAdapter, OBJECT_STORAGE } from './modules/control-plane/object-storage.port.js';
@@ -107,6 +108,7 @@ export class AppModule {
               ? new BullMqValidationQueueAdapter(activeConfig.REDIS_URL!)
               : new MemoryValidationQueueAdapter(),
         },
+        AuthorizationLeaseIssuer,
         AuthService,
         ControlPlaneService,
         { provide: APP_GUARD, useClass: SessionGuard },

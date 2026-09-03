@@ -1,9 +1,17 @@
-import { createHash, createHmac, randomBytes, randomInt, randomUUID } from 'node:crypto';
+import {
+  createHash,
+  createHmac,
+  randomBytes,
+  randomInt,
+  randomUUID,
+  scrypt,
+  timingSafeEqual,
+} from 'node:crypto';
+import { promisify } from 'node:util';
 
 import { Inject, Injectable } from '@nestjs/common';
 import type {
   AuthProvider,
-  AuthProviderId,
   AuthSessionResult,
   CliAuthorizationInput,
   CliRefreshTokenInput,
@@ -11,6 +19,8 @@ import type {
   CliSessionResult,
   CliTokenInput,
   CurrentUser,
+  SocialAuthProviderId,
+  SupportedLocale,
   WorkloadTokenExchangeInput,
 } from '@awesome-workflow/contracts';
 import { CONFIG, type PlatformConfig } from '@awesome-workflow/config';
@@ -37,6 +47,7 @@ const SESSION_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const SHORT_SESSION_TTL_MS = 60 * 60 * 1000;
 const REFRESH_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const CLI_AUTHORIZATION_TTL_MS = 10 * 60 * 1000;
+const scryptPassword = promisify(scrypt);
 
 @Injectable()
 export class AuthService {
@@ -50,22 +61,34 @@ export class AuthService {
   ) {}
 
   providers(): AuthProvider[] {
-    if (this.config.AUTH_MODE === 'oidc') return this.oidc.providers();
+    const password = this.passwordProvider();
+    if (this.config.AUTH_MODE === 'oidc') {
+      const providers = this.oidc.providers();
+      const email = providers.find((provider) => provider.id === 'email');
+      return [
+        ...(email ? [email] : []),
+        password,
+        ...providers.filter((provider) => provider.id !== 'email'),
+      ];
+    }
     const email = {
       id: 'email' as const,
       label: 'Email verification code',
+      labelKey: 'auth.provider.email' as const,
       protocol: 'email_otp' as const,
       status: 'active' as const,
       strategy: 'local_email_otp' as const,
     };
     if (this.config.AUTH_MODE === 'hybrid') {
-      return [email, ...this.oidc.providers().filter((provider) => provider.id !== 'email')];
+      return [email, password, ...this.oidc.providers().filter((provider) => provider.id !== 'email')];
     }
     return [
       email,
+      password,
       ...(['google', 'feishu', 'wechat'] as const).map((id) => ({
         id,
         label: id[0]!.toUpperCase() + id.slice(1),
+        labelKey: `auth.provider.${id}` as const,
         protocol: 'oidc' as const,
         status: 'disabled' as const,
         strategy: 'oidc_broker' as const,
@@ -73,9 +96,31 @@ export class AuthService {
     ];
   }
 
+  async loginPassword(email: string, password: string, clientIp: string): Promise<AuthSessionResult> {
+    if (!this.passwordAuthenticationEnabled()) {
+      throw new DomainError(404, 'password_auth_disabled', 'Administrator password login is disabled');
+    }
+    const normalizedEmail = email.trim().toLowerCase();
+    await this.rateLimiter.consumePasswordLogin({ email: normalizedEmail, clientIp, now: new Date() });
+    if (!(await this.passwordCredentialsMatch(normalizedEmail, password))) {
+      throw new DomainError(401, 'invalid_credentials', 'Invalid email or password');
+    }
+    return this.completeIdentity(
+      {
+        issuer: 'local-password-admin',
+        subject: this.config.AUTH_PASSWORD_ADMIN_EMAIL!,
+        email: this.config.AUTH_PASSWORD_ADMIN_EMAIL!,
+        displayName: this.config.AUTH_PASSWORD_ADMIN_EMAIL!.split('@')[0] || 'admin',
+      },
+      SESSION_TTL_MS,
+      ['platform_admin'],
+    );
+  }
+
   async requestEmailCode(
     email: string,
     clientIp: string,
+    locale: SupportedLocale = 'en-US',
   ): Promise<{ challengeId: string; expiresAt: string; retryAfterSeconds: number; devCode?: string }> {
     this.requireLocalOtp();
     const normalized = email.trim().toLowerCase();
@@ -107,7 +152,7 @@ export class AuthService {
       createdAt: now,
       expiresAt,
     });
-    await this.emailDelivery.sendLoginCode({ email: normalized, code, expiresInMinutes: 5 });
+    await this.emailDelivery.sendLoginCode({ email: normalized, code, expiresInMinutes: 5, locale });
     return {
       challengeId: id,
       expiresAt: expiresAt.toISOString(),
@@ -127,7 +172,11 @@ export class AuthService {
     });
   }
 
-  async beginOidc(input: { provider?: Exclude<AuthProviderId, 'email'>; returnTo?: string }) {
+  async beginOidc(input: {
+    provider?: SocialAuthProviderId;
+    returnTo?: string;
+    uiLocales?: SupportedLocale;
+  }) {
     if (!['oidc', 'hybrid'].includes(this.config.AUTH_MODE))
       throw new DomainError(404, 'oidc_disabled', 'OIDC authentication is not enabled');
     if (this.config.AUTH_MODE === 'hybrid' && !input.provider) {
@@ -167,10 +216,11 @@ export class AuthService {
     });
     const continuation = `/api/v1/auth/cli/approve?requestId=${encodeURIComponent(id)}`;
     if (this.config.AUTH_MODE === 'oidc') {
-      return this.oidc.begin({ returnTo: continuation });
+      return this.oidc.begin({ returnTo: continuation, uiLocales: input.locale });
     }
     const loginContinuation = new URL('/', this.config.WEB_PUBLIC_URL);
     loginContinuation.searchParams.set('cliRequestId', id);
+    if (input.locale) loginContinuation.searchParams.set('locale', input.locale);
     return { authorizationUrl: loginContinuation.toString() };
   }
 
@@ -298,11 +348,15 @@ export class AuthService {
   private async completeIdentity(
     identity: { issuer: string; subject: string; email: string; displayName: string },
     ttlMs = SESSION_TTL_MS,
+    platformRoles?: CurrentUser['platformRoles'],
   ): Promise<AuthSessionResult> {
-    const platformRoles = this.config.bootstrapAdminEmails.has(identity.email)
-      ? (['platform_admin'] as const)
-      : [];
-    const user = await this.repository.upsertIdentity({ ...identity, platformRoles: [...platformRoles] });
+    const effectivePlatformRoles =
+      platformRoles ??
+      (this.config.bootstrapAdminEmails.has(identity.email) ? (['platform_admin'] as const) : []);
+    const user = await this.repository.upsertIdentity({
+      ...identity,
+      platformRoles: [...effectivePlatformRoles],
+    });
     return this.issueSession(user, ttlMs);
   }
 
@@ -338,6 +392,41 @@ export class AuthService {
 
   private hashCliCode(code: string): string {
     return createHmac('sha256', this.config.SESSION_SECRET).update(`cli-code:${code}`).digest('hex');
+  }
+
+  private passwordProvider(): AuthProvider {
+    return {
+      id: 'password',
+      label: 'Administrator account',
+      labelKey: 'auth.provider.password',
+      protocol: 'password',
+      status: this.passwordAuthenticationEnabled() ? 'active' : 'disabled',
+      strategy: 'local_password',
+    };
+  }
+
+  private passwordAuthenticationEnabled(): boolean {
+    return Boolean(this.config.AUTH_PASSWORD_ADMIN_EMAIL && this.config.AUTH_PASSWORD_ADMIN_PASSWORD);
+  }
+
+  private async passwordCredentialsMatch(email: string, password: string): Promise<boolean> {
+    const emailMatches = timingSafeEqual(
+      this.passwordCredentialDigest(email),
+      this.passwordCredentialDigest(this.config.AUTH_PASSWORD_ADMIN_EMAIL!),
+    );
+    const salt = createHmac('sha256', this.config.SESSION_SECRET)
+      .update(`password-admin:${this.config.AUTH_PASSWORD_ADMIN_EMAIL!}`)
+      .digest();
+    const [candidateHash, configuredHash] = await Promise.all([
+      scryptPassword(password, salt, 64) as Promise<Buffer>,
+      scryptPassword(this.config.AUTH_PASSWORD_ADMIN_PASSWORD!, salt, 64) as Promise<Buffer>,
+    ]);
+    const passwordMatches = timingSafeEqual(candidateHash, configuredHash);
+    return emailMatches && passwordMatches;
+  }
+
+  private passwordCredentialDigest(value: string): Buffer {
+    return createHmac('sha256', this.config.SESSION_SECRET).update(`password-login:${value}`).digest();
   }
 
   private hashOtp(challengeId: string, email: string, code: string): string {

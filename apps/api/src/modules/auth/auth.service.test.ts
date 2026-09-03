@@ -12,6 +12,7 @@ const oidcProviders: AuthProvider[] = [
   {
     id: 'email',
     label: 'Broker email',
+    labelKey: 'auth.provider.email',
     protocol: 'oidc',
     status: 'active',
     strategy: 'oidc_broker',
@@ -20,6 +21,7 @@ const oidcProviders: AuthProvider[] = [
   {
     id: 'google',
     label: 'Google',
+    labelKey: 'auth.provider.google',
     protocol: 'oidc',
     status: 'active',
     strategy: 'oidc_broker',
@@ -28,6 +30,7 @@ const oidcProviders: AuthProvider[] = [
   {
     id: 'feishu',
     label: 'Feishu',
+    labelKey: 'auth.provider.feishu',
     protocol: 'oidc',
     status: 'disabled',
     strategy: 'oidc_broker',
@@ -35,6 +38,7 @@ const oidcProviders: AuthProvider[] = [
   {
     id: 'wechat',
     label: 'WeChat',
+    labelKey: 'auth.provider.wechat',
     protocol: 'oidc',
     status: 'disabled',
     strategy: 'oidc_broker',
@@ -158,6 +162,8 @@ function productionHybridEnvironment(): NodeJS.ProcessEnv {
     SMTP_PASSWORD: 'production-smtp-password',
     SMTP_FROM: 'Awesome Workflow <no-reply@example.test>',
     WORKER_CALLBACK_TOKEN: 'production-worker-token-that-is-at-least-32-characters',
+    AUTHORIZATION_LEASE_SIGNING_KEY_ID: 'production-authorization-lease-key',
+    AUTHORIZATION_LEASE_SIGNING_PRIVATE_KEY: Buffer.alloc(32, 9).toString('base64'),
     VALIDATION_QUEUE_MODE: 'redis',
     OBJECT_STORAGE_MODE: 's3',
     S3_ENDPOINT: 'https://objects.internal.example.test',

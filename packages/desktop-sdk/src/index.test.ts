@@ -6,16 +6,19 @@ import {
   DesktopClient,
   type DesktopRpcEnvelope,
   type DesktopRpcTransport,
+  type DesktopTaskContext,
   getTaskContext,
 } from './index.js';
 
-const context = {
+const context: DesktopTaskContext = {
   protocolVersion: DESKTOP_RPC_PROTOCOL_VERSION,
   appId: 'sample-app',
   taskId: 'task-1',
   lease: 'lease-value-that-must-never-be-forwarded-remotely',
   rpcEndpoint: String.raw`\\.\pipe\awesome-workflow-task-test`,
   workDirectory: String.raw`C:\tasks\task-1`,
+  locale: 'zh-CN',
+  fallbackLocales: ['en-US'],
 };
 
 test('client binds every call to the Host-provided task scope', async () => {
@@ -67,6 +70,8 @@ test('runner context rejects incomplete or incompatible environments', () => {
       AW_LEASE: 'lease',
       AW_RPC_ENDPOINT: context.rpcEndpoint,
       AW_WORK_DIRECTORY: context.workDirectory,
+      AW_LOCALE: context.locale,
+      AW_FALLBACK_LOCALES: context.fallbackLocales.join(','),
     }),
   );
 });

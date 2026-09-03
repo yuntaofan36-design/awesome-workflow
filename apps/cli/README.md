@@ -38,6 +38,23 @@ pnpm aw promote `
 pnpm aw status --release-id 00000000-0000-4000-8000-000000000002
 ```
 
+## Language
+
+The CLI ships `en-US` and `zh-CN` messages. Select a language globally before
+the command, or configure it for the current process:
+
+```powershell
+pnpm aw --locale zh-CN help
+$env:AW_LOCALE = 'zh-CN'
+pnpm aw status --release-id 00000000-0000-4000-8000-000000000002
+```
+
+Resolution order is `--locale`, `AW_LOCALE`, operating-system locale, then
+`en-US`. Human-readable help and errors are translated, while JSON field names
+and protocol values such as `approved`, `stable`, and `approve` remain stable
+for automation. `Accept-Language` is sent only to the Awesome Workflow API; it
+is removed from presigned object-storage uploads.
+
 Use `--token-env NAME` in ephemeral automation when an already exchanged,
 short-lived publisher token is injected by the runner. The variable's value is
 never printed. `aw login --ci-oidc-env NAME` instead treats the value as a
@@ -79,10 +96,16 @@ complete multi-artifact release:
 The CLI rejects absolute/traversing archive paths, Windows device/alternate
 stream paths, case-folded duplicates, symlinks, and non-regular files. Web
 federation packages bind `integritySha256` to the single `mf-manifest.json` in
-the build output. Desktop artifact maps must cover the manifest's complete
-artifact set, and each artifact input must contain the runtime entries that
-reference it. The manifest is signed only after every immutable artifact
-descriptor has been derived.
+the build output. `aw init` puts `__AW_FEDERATION_SHA256__` in the manifest URL
+path; `aw package` replaces it with the measured digest before signing. A
+custom Federation URL must use the same placeholder or already contain the
+measured digest in its path. `resourceOrigins` contains exact HTTPS origins
+(loopback HTTP is reserved for local development), and the signed Federation
+CSP must name exactly those origins for scripts, styles, and manifest fetches.
+Desktop artifact maps must cover the manifest's complete artifact set, and
+each artifact input must contain the runtime entries that reference it. The
+manifest is signed only after every immutable artifact descriptor has been
+derived.
 
 The shared `UploadIntentSchema` declares separate presigned PUT targets for the
 artifact and primary SBOM. Publishing treats both as mandatory, stops before an

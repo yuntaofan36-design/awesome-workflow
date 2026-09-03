@@ -1,4 +1,4 @@
-import { Alert, Spin } from '@arco-design/web-react';
+import { Spin } from '@arco-design/web-react';
 import {
   AW_BRIDGE_VERSION,
   AW_CONNECT_MESSAGE,
@@ -8,6 +8,8 @@ import {
 import { useEffect, useRef, useState } from 'react';
 
 import type { CatalogEntry, IframeManifest } from '../types/catalog';
+import { LocalizedErrorAlert } from '../components/LocalizedErrorAlert';
+import { useI18n } from '../i18n/I18nProvider';
 import { serveHostApi } from './hostApi';
 
 export function IframeRuntime({
@@ -17,6 +19,7 @@ export function IframeRuntime({
   entry: CatalogEntry & { manifest: IframeManifest };
   host: HostApi;
 }) {
+  const { t } = useI18n();
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [status, setStatus] = useState<'connecting' | 'error' | 'ready'>('connecting');
   const [error, setError] = useState<string | null>(null);
@@ -63,12 +66,16 @@ export function IframeRuntime({
     <div className="runtime-frame runtime-frame--iframe">
       {status === 'connecting' && (
         <div className="runtime-overlay runtime-overlay--compact">
-          <Spin dot tip="Negotiating isolated bridge…" />
+          <Spin dot tip={t('runtime.iframeConnecting')} />
         </div>
       )}
       {status === 'error' && (
         <div className="runtime-overlay">
-          <Alert type="error" title="Iframe policy rejected" content={error} />
+          <LocalizedErrorAlert
+            error={error}
+            fallbackKey="errors.hostError"
+            title={t('runtime.iframeRejected')}
+          />
         </div>
       )}
       <iframe

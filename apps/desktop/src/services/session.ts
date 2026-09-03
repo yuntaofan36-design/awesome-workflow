@@ -1,13 +1,14 @@
 import { invoke } from '@tauri-apps/api/core';
 
 import type { CurrentUser } from '@/types';
+import { getDesktopRequestLocale } from '../i18n/requestLocale';
 
 export type AuthProvider = {
-  id: 'email' | 'google' | 'feishu' | 'wechat';
+  id: 'email' | 'password' | 'google' | 'feishu' | 'wechat';
   label: string;
-  protocol: 'email_otp' | 'oidc';
+  protocol: 'email_otp' | 'password' | 'oidc';
   status: 'active' | 'configured' | 'disabled';
-  strategy?: 'local_email_otp' | 'oidc_broker';
+  strategy?: 'local_email_otp' | 'local_password' | 'oidc_broker';
   authorizeUrl?: string;
 };
 
@@ -25,18 +26,24 @@ function requireDesktopRuntime() {
 export const sessionApi = {
   providers: async () => {
     requireDesktopRuntime();
-    return invoke<AuthProvider[]>('desktop_auth_providers');
+    return invoke<AuthProvider[]>('desktop_auth_providers', {
+      input: { locale: getDesktopRequestLocale() },
+    });
   },
   current: async () => {
     requireDesktopRuntime();
-    return invoke<DesktopSession | null>('desktop_session_current');
+    return invoke<DesktopSession | null>('desktop_session_current', {
+      input: { locale: getDesktopRequestLocale() },
+    });
   },
-  login: async () => {
+  login: async (locale: 'en-US' | 'zh-CN') => {
     requireDesktopRuntime();
-    return invoke<DesktopSession>('desktop_session_login');
+    return invoke<DesktopSession>('desktop_session_login', { input: { locale } });
   },
   logout: async () => {
     requireDesktopRuntime();
-    return invoke<void>('desktop_session_logout');
+    return invoke<void>('desktop_session_logout', {
+      input: { locale: getDesktopRequestLocale() },
+    });
   },
 };

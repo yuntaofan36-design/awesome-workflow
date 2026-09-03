@@ -23,6 +23,8 @@ data:
   SMTP_FROM: {{ .Values.config.api.smtpFrom | quote }}
   EMAIL_WEBHOOK_URL: {{ .Values.config.api.emailWebhookUrl | quote }}
   BOOTSTRAP_ADMIN_EMAILS: {{ .Values.config.api.bootstrapAdminEmails | quote }}
+  AUTHORIZATION_LEASE_SIGNING_KEY_ID: {{ .Values.config.api.authorizationLeaseSigningKeyId | quote }}
+  AUTHORIZATION_LEASE_TTL_SECONDS: {{ .Values.config.api.authorizationLeaseTtlSeconds | quote }}
   VALIDATION_QUEUE_MODE: {{ .Values.config.api.validationQueueMode | quote }}
   OBJECT_STORAGE_MODE: {{ .Values.config.api.objectStorageMode | quote }}
   ARTIFACT_UPLOAD_BASE_URL: {{ .Values.config.api.artifactUploadBaseUrl | quote }}
@@ -57,6 +59,13 @@ data:
       root /usr/share/nginx/html;
       index index.html;
 
+      location = /.well-known/awesome-workflow/federation-policy {
+        default_type text/plain;
+        return 200 {{ $component.csp.scriptOrigins | quote }};
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options nosniff always;
+      }
+
       location /assets/ {
         try_files $uri =404;
         add_header Cache-Control "public, max-age=31536000, immutable";
@@ -66,7 +75,7 @@ data:
         add_header Referrer-Policy strict-origin-when-cross-origin always;
         add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
         add_header Cross-Origin-Opener-Policy same-origin always;
-        add_header Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self' {{ $component.csp.scriptOrigins }}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' {{ $component.csp.connectOrigins }}; frame-src {{ $component.csp.frameOrigins }}; form-action 'self'; frame-ancestors 'self'" always;
+        add_header Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self' {{ $component.csp.scriptOrigins }}; style-src 'self' 'unsafe-inline' {{ $component.csp.scriptOrigins }}; img-src 'self' data: blob: {{ $component.csp.scriptOrigins }}; font-src 'self' data:; connect-src 'self' {{ $component.csp.scriptOrigins }} {{ $component.csp.connectOrigins }}; frame-src {{ $component.csp.frameOrigins }}; form-action 'self'; frame-ancestors 'self'" always;
       }
 
       location / {
@@ -78,7 +87,7 @@ data:
         add_header Referrer-Policy strict-origin-when-cross-origin always;
         add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
         add_header Cross-Origin-Opener-Policy same-origin always;
-        add_header Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self' {{ $component.csp.scriptOrigins }}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' {{ $component.csp.connectOrigins }}; frame-src {{ $component.csp.frameOrigins }}; form-action 'self'; frame-ancestors 'self'" always;
+        add_header Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self' {{ $component.csp.scriptOrigins }}; style-src 'self' 'unsafe-inline' {{ $component.csp.scriptOrigins }}; img-src 'self' data: blob: {{ $component.csp.scriptOrigins }}; font-src 'self' data:; connect-src 'self' {{ $component.csp.scriptOrigins }} {{ $component.csp.connectOrigins }}; frame-src {{ $component.csp.frameOrigins }}; form-action 'self'; frame-ancestors 'self'" always;
       }
     }
 {{ end }}

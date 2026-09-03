@@ -44,6 +44,9 @@ importers:
       '@awesome-workflow/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@awesome-workflow/i18n':
+        specifier: workspace:*
+        version: link:../../packages/i18n
       '@awesome-workflow/manifest-schema':
         specifier: workspace:*
         version: link:../../packages/manifest-schema
@@ -129,6 +132,9 @@ importers:
       '@awesome-workflow/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@awesome-workflow/i18n':
+        specifier: workspace:*
+        version: link:../../packages/i18n
       '@awesome-workflow/manifest-schema':
         specifier: workspace:*
         version: link:../../packages/manifest-schema
@@ -151,6 +157,9 @@ importers:
       '@awesome-workflow/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@awesome-workflow/i18n':
+        specifier: workspace:*
+        version: link:../../packages/i18n
       '@awesome-workflow/manifest-schema':
         specifier: workspace:*
         version: link:../../packages/manifest-schema
@@ -212,6 +221,9 @@ importers:
 
   apps/demo-web-app:
     dependencies:
+      '@awesome-workflow/i18n':
+        specifier: workspace:*
+        version: link:../../packages/i18n
       '@awesome-workflow/web-sdk':
         specifier: workspace:*
         version: link:../../packages/web-sdk
@@ -222,12 +234,18 @@ importers:
       vite:
         specifier: ^7.0.0
         version: 7.3.6(@types/node@24.13.3)(jiti@2.7.0)(less@4.9.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0)
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(less@4.9.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0)
 
   apps/desktop:
     dependencies:
       '@arco-design/web-react':
         specifier: ^2.66.0
         version: 2.66.16(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@awesome-workflow/i18n':
+        specifier: workspace:*
+        version: link:../../packages/i18n
       '@tauri-apps/api':
         specifier: ^2.5.0
         version: 2.11.1
@@ -310,6 +328,9 @@ importers:
       '@awesome-workflow/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@awesome-workflow/i18n':
+        specifier: workspace:*
+        version: link:../../packages/i18n
       '@awesome-workflow/manifest-schema':
         specifier: workspace:*
         version: link:../../packages/manifest-schema
@@ -338,6 +359,9 @@ importers:
         specifier: ^5.0.0
         version: 5.0.15(@types/react@19.2.18)(react@19.2.8)
     devDependencies:
+      '@playwright/test':
+        specifier: ^1.55.0
+        version: 1.62.1
       '@tailwindcss/vite':
         specifier: ^4.1.0
         version: 4.3.3(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(less@4.9.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0))
@@ -456,6 +480,22 @@ importers:
       '@awesome-workflow/contracts':
         specifier: workspace:*
         version: link:../contracts
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.13.3
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+
+  packages/i18n:
+    dependencies:
+      '@awesome-workflow/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      i18next:
+        specifier: ^25.5.2
+        version: 25.10.10(typescript@5.9.3)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1480,6 +1520,11 @@ packages:
 
   '@pinojs/redact@0.4.0':
     resolution: {integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==}
+
+  '@playwright/test@1.62.1':
+    resolution: {integrity: sha512-DTcUc8qii+cpHvtOwggMtBRMjKZHXYWdw8syRYu2vtzuq4Wxphqq4NfCs5Zt44L6mA8rfDfj+PHnxFc/FeK6mQ==}
+    engines: {node: '>=20'}
+    hasBin: true
 
   '@redis/bloom@5.12.1':
     resolution: {integrity: sha512-PUUfv+ms7jgPSBVoo/DN4AkPHj4D5TZSd6SbJX7egzBplkYUcKmHRE8RKia7UtZ8bSQbLguLvxVO+asKtQfZWA==}
@@ -2648,6 +2693,11 @@ packages:
     resolution: {integrity: sha512-yhlQgA6mnOJUKOsRUFsgJdQCvkKhcz8tlZG5HBQfReYZy46OwLcY+Zia0mtdHsOo9y/hP+CxMN0TU9QxoOtG4g==}
     engines: {node: '>=6 <7 || >=8'}
 
+  fsevents@2.3.2:
+    resolution: {integrity: sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA==}
+    engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
+    os: [darwin]
+
   fsevents@2.3.3:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
@@ -2694,6 +2744,14 @@ packages:
   human-id@4.2.1:
     resolution: {integrity: sha512-zPGsiS+dWoTZtZ4AtpA9Y+BdSFSNWvnouNlWNoUFyAM6xHOHmdCvqO3k8AIbdamCOv4gUFUVNPf6rJFfc4UiJw==}
     hasBin: true
+
+  i18next@25.10.10:
+    resolution: {integrity: sha512-cqUW2Z3EkRx7NqSyywjkgCLK7KLCL6IFVFcONG7nVYIJ3ekZ1/N5jUsihHV6Bq37NfhgtczxJcxduELtjTwkuQ==}
+    peerDependencies:
+      typescript: ^5 || ^6
+    peerDependenciesMeta:
+      typescript:
+        optional: true
 
   iconv-lite@0.4.24:
     resolution: {integrity: sha512-v3MXnZAcvnywkTUEZomIActle7RXXeedOR31wwl7VlyoXO4Qi9arvSenNQWne1TcRwhCL1HwLI21bEqdpj8/rA==}
@@ -3163,6 +3221,16 @@ packages:
 
   pino@10.3.1:
     resolution: {integrity: sha512-r34yH/GlQpKZbU1BvFFqOjhISRo1MNx1tWYsYvmj6KIRHSPMT2+yHOEb1SG6NMvRoHRF0a07kCOox/9yakl1vg==}
+    hasBin: true
+
+  playwright-core@1.62.1:
+    resolution: {integrity: sha512-wPYSwEBJY9GHraISXqyqtx0na0LpO3XEX7jNDhntbex7tzUS7kLnZsOlFruFJB4Hi/rhDMjXGqHewDZ68nYZVw==}
+    engines: {node: '>=20'}
+    hasBin: true
+
+  playwright@1.62.1:
+    resolution: {integrity: sha512-0M+L3LAD8/nm554LOla9Ayx0j0tmFZ0FBcoQ7F1VuVHpM/XpiC8RcDzBQB8W5+hA8L22THxELzeF+2WcUzvcLg==}
+    engines: {node: '>=20'}
     hasBin: true
 
   pluralize@8.0.0:
@@ -4753,6 +4821,10 @@ snapshots:
 
   '@pinojs/redact@0.4.0': {}
 
+  '@playwright/test@1.62.1':
+    dependencies:
+      playwright: 1.62.1
+
   '@redis/bloom@5.12.1(@redis/client@5.12.1)':
     dependencies:
       '@redis/client': 5.12.1
@@ -5856,6 +5928,9 @@ snapshots:
       jsonfile: 4.0.0
       universalify: 0.1.2
 
+  fsevents@2.3.2:
+    optional: true
+
   fsevents@2.3.3:
     optional: true
 
@@ -5898,6 +5973,12 @@ snapshots:
       - supports-color
 
   human-id@4.2.1: {}
+
+  i18next@25.10.10(typescript@5.9.3):
+    dependencies:
+      '@babel/runtime': 7.29.7
+    optionalDependencies:
+      typescript: 5.9.3
 
   iconv-lite@0.4.24:
     dependencies:
@@ -6318,6 +6399,14 @@ snapshots:
       safe-stable-stringify: 2.5.0
       sonic-boom: 4.2.1
       thread-stream: 4.2.0
+
+  playwright-core@1.62.1: {}
+
+  playwright@1.62.1:
+    dependencies:
+      playwright-core: 1.62.1
+    optionalDependencies:
+      fsevents: 2.3.2
 
   pluralize@8.0.0: {}
 

@@ -34,6 +34,8 @@ import type {
   RequestInstallationInput,
   ReviewReleaseInput,
   ScheduleSyncQuery,
+  ScheduleRecord,
+  ScheduleRecordIntent,
   UpdateInstallationStatusInput,
   UpdateScheduleInput,
   ValidationEvidence,
@@ -49,6 +51,7 @@ import {
 import { DomainError, forbidden, invalidState } from '../../core/errors.js';
 import { PLATFORM_REPOSITORY, type PlatformRepository } from '../../core/repository.js';
 import { hashDeviceCredential, issueDeviceCredential } from '../../http/device-auth.js';
+import { AuthorizationLeaseIssuer } from './authorization-lease.issuer.js';
 import { OBJECT_STORAGE, type ObjectStoragePort } from './object-storage.port.js';
 import { VALIDATION_QUEUE, type ValidationQueuePort } from './validation-queue.port.js';
 
@@ -60,6 +63,8 @@ export class ControlPlaneService {
     @Inject(PLATFORM_REPOSITORY) private readonly repository: PlatformRepository,
     @Inject(OBJECT_STORAGE) private readonly objectStorage: ObjectStoragePort,
     @Inject(VALIDATION_QUEUE) private readonly validationQueue: ValidationQueuePort,
+    @Inject(AuthorizationLeaseIssuer)
+    private readonly authorizationLeases: AuthorizationLeaseIssuer,
   ) {}
 
   async listWorkspaces(actor: CurrentUser) {
@@ -304,7 +309,7 @@ export class ControlPlaneService {
       releaseId: release.id,
       now: new Date(),
     });
-    const download = await this.objectStorage.createDownload(artifact.storageKey);
+    const download = await this.objectStorage.createDeviceDownload(artifact.storageKey);
     return {
       installationId: installation.id,
       status: installation.status as InstallationSyncItem['status'],
@@ -354,7 +359,85 @@ export class ControlPlaneService {
 
   async syncSchedules(device: Device, deviceId: string, input: ScheduleSyncQuery) {
     this.requireDeviceScope(device, deviceId);
-    return this.repository.syncSchedules(device.id, input);
+    this.authorizationLeases.assertAvailable();
+    const sync = await this.repository.syncSchedules(device.id, input);
+    if (sync.kind === 'delta' && sync.delta.fromRevision === sync.delta.toRevision) {
+      const refreshed = await this.repository.syncSchedules(device.id, {});
+      if (refreshed.kind !== 'snapshot') {
+        throw new Error('Schedule repository did not return a lease refresh snapshot');
+      }
+      return {
+        kind: 'snapshot' as const,
+        snapshot: {
+          revision: refreshed.snapshot.revision,
+          schedules: await Promise.all(
+            refreshed.snapshot.schedules.map((record) => this.authorizeScheduleRecord(device, record)),
+          ),
+        },
+      };
+    }
+    if (sync.kind === 'snapshot') {
+      return {
+        kind: 'snapshot' as const,
+        snapshot: {
+          revision: sync.snapshot.revision,
+          schedules: await Promise.all(
+            sync.snapshot.schedules.map((record) => this.authorizeScheduleRecord(device, record)),
+          ),
+        },
+      };
+    }
+    return {
+      kind: 'delta' as const,
+      delta: {
+        ...sync.delta,
+        upserts: await Promise.all(
+          sync.delta.upserts.map((record) => this.authorizeScheduleRecord(device, record)),
+        ),
+      },
+    };
+  }
+
+  private async authorizeScheduleRecord(
+    device: Device,
+    record: ScheduleRecordIntent,
+  ): Promise<ScheduleRecord> {
+    const schedule = await this.repository.getSchedule(record.scheduleId);
+    const [application, release, grant] = await Promise.all([
+      this.repository.getApplication(schedule.applicationId),
+      this.repository.getRelease(schedule.releaseId),
+      this.repository.requireActivePermissionGrant({
+        deviceId: device.id,
+        releaseId: schedule.releaseId,
+        now: new Date(),
+      }),
+    ]);
+    if (
+      schedule.targetDeviceId !== device.id ||
+      schedule.revision !== record.revision ||
+      application.id !== schedule.applicationId ||
+      release.id !== schedule.releaseId ||
+      release.applicationId !== application.id ||
+      application.slug !== record.appId ||
+      release.version !== record.version
+    ) {
+      invalidState('The synchronized schedule authorization scope changed before lease issuance');
+    }
+    return {
+      ...record,
+      authorizationLease: this.authorizationLeases.issue({
+        revision: record.revision,
+        deviceId: device.id,
+        applicationId: application.id,
+        releaseId: release.id,
+        appId: application.slug,
+        version: release.version,
+        task: { kind: 'schedule', id: schedule.id },
+        capabilityHash: grant.capabilityHash,
+        intent: record,
+        grantExpiresAt: grant.expiresAt,
+      }),
+    };
   }
 
   async createManualRun(actor: CurrentUser, input: CreateManualRunInput) {
@@ -386,7 +469,23 @@ export class ControlPlaneService {
 
   async claimRuns(device: Device, deviceId: string, input: ClaimRunsInput) {
     this.requireDeviceScope(device, deviceId);
-    return this.repository.claimRuns(device.id, input);
+    this.authorizationLeases.assertAvailable();
+    const claims = await this.repository.claimRuns(device.id, input);
+    return claims.map(({ applicationId, releaseId, capabilityHash, grantExpiresAt, ...claim }) => ({
+      ...claim,
+      authorizationLease: this.authorizationLeases.issue({
+        revision: claim.attempt,
+        deviceId: device.id,
+        applicationId,
+        releaseId,
+        appId: claim.appId,
+        version: claim.version,
+        task: { kind: 'run', id: claim.runId },
+        capabilityHash,
+        intent: claim,
+        grantExpiresAt,
+      }),
+    }));
   }
 
   async runControl(device: Device, deviceId: string) {
@@ -542,13 +641,13 @@ export class ControlPlaneService {
           status.artifacts.map(async (artifact) => ({
             artifactId: artifact.id,
             fileName: artifact.fileName,
-            url: (await this.objectStorage.createDownload(artifact.storageKey)).url,
+            url: (await this.objectStorage.createWorkerDownload(artifact.storageKey)).url,
             expectedSha256: artifact.sha256,
             expectedSize: artifact.size,
             signature: artifact.signature,
             sbom: {
               ...artifact.sbom,
-              url: (await this.objectStorage.createDownload(artifact.sbomStorageKey)).url,
+              url: (await this.objectStorage.createWorkerDownload(artifact.sbomStorageKey)).url,
             },
           })),
         ),

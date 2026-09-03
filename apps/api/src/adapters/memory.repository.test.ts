@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { computeDesktopCapabilityHash, type ReleaseManifest } from '@awesome-workflow/manifest-schema';
+import { computeDesktopCapabilityHash, type DesktopReleaseManifest } from '@awesome-workflow/manifest-schema';
 
 import { DomainError } from '../core/errors.js';
 import { MemoryPlatformRepository } from './memory.repository.js';
@@ -258,7 +258,7 @@ test('desktop control plane preserves release, revision, installation and run st
     createdBy: owner.id,
   });
   const desktopArtifact = artifactDeclaration('windows-x64');
-  const desktopManifest: ReleaseManifest = {
+  const desktopManifest: DesktopReleaseManifest = {
     schemaVersion: 1,
     appId: desktopApplication.slug,
     version: '2.3.4',
@@ -268,6 +268,8 @@ test('desktop control plane preserves release, revision, installation and run st
     kind: 'desktop',
     name: 'Desktop runner',
     description: 'Runs a signed native micro-application',
+    defaultLocale: 'en-US',
+    localizations: {},
     runtimes: [
       {
         kind: 'native',
@@ -503,6 +505,10 @@ test('desktop control plane preserves release, revision, installation and run st
       version: desktopRelease.version,
       args: ['--manual'],
       requiresElevation: true,
+      applicationId: desktopApplication.id,
+      releaseId: desktopRelease.id,
+      capabilityHash,
+      grantExpiresAt: null,
     },
   ]);
   assert.equal(

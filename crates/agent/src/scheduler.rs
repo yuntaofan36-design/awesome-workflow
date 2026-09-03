@@ -6,7 +6,10 @@ use croner::Cron;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{AgentError, AgentResult};
+use crate::{
+    authorization::authorization_intent_hash, AgentError, AgentResult, AuthorizationLease,
+    AuthorizationTaskKind,
+};
 
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
@@ -14,7 +17,11 @@ const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ScheduleRecord {
     pub schedule_id: String,
+    pub revision: u64,
+    pub application_id: String,
+    pub release_id: String,
     pub app_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     pub cron_expression: String,
     pub timezone: String,
@@ -22,12 +29,28 @@ pub struct ScheduleRecord {
     #[serde(default)]
     pub args: Vec<String>,
     pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorization_lease: Option<AuthorizationLease>,
 }
 
 impl ScheduleRecord {
     pub(crate) fn validate(&self) -> AgentResult<()> {
         if Uuid::parse_str(&self.schedule_id).is_err() {
             return invalid_schedule(&self.schedule_id, "scheduleId must be a UUID");
+        }
+        if self.revision == 0 || self.revision > MAX_SAFE_INTEGER {
+            return invalid_schedule(
+                &self.schedule_id,
+                "revision must be a positive safe integer",
+            );
+        }
+        if Uuid::parse_str(&self.application_id).is_err()
+            || Uuid::parse_str(&self.release_id).is_err()
+        {
+            return invalid_schedule(
+                &self.schedule_id,
+                "applicationId and releaseId must be UUIDs",
+            );
         }
         if !is_application_slug(&self.app_id) {
             return invalid_schedule(&self.schedule_id, "appId must be a lowercase slug");
@@ -54,7 +77,36 @@ impl ScheduleRecord {
         if self.args.len() > 256 || self.args.iter().any(|argument| argument.len() > 8_192) {
             return invalid_schedule(&self.schedule_id, "args exceed the execution limits");
         }
+        if let Some(lease) = &self.authorization_lease {
+            lease.validate()?;
+            if lease.claims.task.kind != AuthorizationTaskKind::Schedule
+                || lease.claims.task.id != self.schedule_id
+                || lease.claims.revision != self.revision
+                || lease.claims.application_id != self.application_id
+                || lease.claims.release_id != self.release_id
+                || lease.claims.app_id != self.app_id
+                || self
+                    .version
+                    .as_deref()
+                    .is_some_and(|version| version != lease.claims.version)
+                || lease.claims.intent_hash != self.authorization_intent_hash()?
+            {
+                return invalid_schedule(
+                    &self.schedule_id,
+                    "authorization lease scope does not match the schedule",
+                );
+            }
+        }
         Ok(())
+    }
+
+    pub(crate) fn authorization_intent_hash(&self) -> AgentResult<String> {
+        let mut intent = serde_json::to_value(self)?;
+        intent
+            .as_object_mut()
+            .ok_or_else(|| AgentError::State("schedule intent is not an object".into()))?
+            .remove("authorizationLease");
+        authorization_intent_hash(&intent)
     }
 
     pub(crate) fn validate_recurrence(&self) -> AgentResult<()> {
@@ -274,6 +326,9 @@ mod tests {
     fn schedule(cron_expression: &str, timezone: &str, next_run_at_ms: u64) -> ScheduleRecord {
         ScheduleRecord {
             schedule_id: SCHEDULE_ID.into(),
+            revision: 1,
+            application_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".into(),
+            release_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb".into(),
             app_id: "demo-app".into(),
             version: Some("1.2.3".into()),
             cron_expression: cron_expression.into(),
@@ -281,7 +336,67 @@ mod tests {
             next_run_at_ms,
             args: vec![],
             enabled: true,
+            authorization_lease: None,
         }
+    }
+
+    fn authorized_schedule() -> ScheduleRecord {
+        let mut record = schedule("0 * * * *", "UTC", 1_800_000_600_000);
+        record.args = vec!["--safe".into()];
+        let intent_hash = record.authorization_intent_hash().unwrap();
+        record.authorization_lease = Some(AuthorizationLease {
+            claims: crate::AuthorizationLeaseClaims {
+                schema_version: 1,
+                lease_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc".into(),
+                revision: record.revision,
+                device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd".into(),
+                application_id: record.application_id.clone(),
+                release_id: record.release_id.clone(),
+                app_id: record.app_id.clone(),
+                version: record.version.clone().unwrap(),
+                task: crate::AuthorizationLeaseTask {
+                    kind: AuthorizationTaskKind::Schedule,
+                    id: record.schedule_id.clone(),
+                },
+                capability_hash: "a".repeat(64),
+                intent_hash,
+                issued_at: 1_800_000_000_000,
+                expires_at: 1_800_000_300_000,
+            },
+            signature: crate::AuthorizationLeaseSignature {
+                algorithm: "ed25519".into(),
+                key_id: "intent-test".into(),
+                value: "A".repeat(88),
+            },
+        });
+        record
+    }
+
+    #[test]
+    fn schedule_authorization_rejects_every_mutated_execution_intent_field() {
+        let record = authorized_schedule();
+        record.validate().unwrap();
+
+        let mut variants = Vec::new();
+        let mut cron = record.clone();
+        cron.cron_expression = "*/2 * * * *".into();
+        variants.push(cron);
+        let mut timezone = record.clone();
+        timezone.timezone = "Asia/Shanghai".into();
+        variants.push(timezone);
+        let mut next_run = record.clone();
+        next_run.next_run_at_ms += 1;
+        variants.push(next_run);
+        let mut args = record.clone();
+        args.args = vec!["--unsafe".into()];
+        variants.push(args);
+        let mut enabled = record;
+        enabled.enabled = false;
+        variants.push(enabled);
+
+        assert!(variants
+            .into_iter()
+            .all(|variant| variant.validate().is_err()));
     }
 
     #[test]

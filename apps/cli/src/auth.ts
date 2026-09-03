@@ -7,6 +7,7 @@ import { AuthSessionResultSchema, type AuthSessionResult } from '@awesome-workfl
 import { ApiClient, ApiHttpError, type FetchLike } from './api-client.js';
 import { saveCredential } from './credentials.js';
 import { CliError, SecretRedactor, isRecord, requireEnvironmentSecret } from './safety.js';
+import { cliText, getCliLocale } from './i18n.js';
 
 export type PkcePair = { verifier: string; challenge: string };
 
@@ -26,7 +27,7 @@ export function assertCallbackState(expected: string, received: string | null): 
     .update(received ?? '', 'utf8')
     .digest();
   if (!received || received.length !== expected.length || !timingSafeEqual(expectedDigest, receivedDigest)) {
-    throw new CliError('Login callback state did not match; the authorization response was rejected.');
+    throw new CliError(cliText('auth.state'));
   }
 }
 
@@ -52,6 +53,7 @@ export async function interactiveLogin(options: {
       codeChallenge: pkce.challenge,
       codeChallengeMethod: 'S256',
       state,
+      locale: getCliLocale(),
     });
     await (options.openBrowser ?? openSystemBrowser)(authorizationUrl);
     const code = await receiver.code;
@@ -91,9 +93,7 @@ export async function workloadLogin(options: {
     });
   } catch (error) {
     if (error instanceof ApiHttpError && error.status === 404) {
-      throw new CliError(
-        'Server does not support workload authentication. Required endpoint: /api/v1/auth/workload/exchange.',
-      );
+      throw new CliError(cliText('auth.workloadUnsupported'));
     }
     throw error;
   }
@@ -139,29 +139,36 @@ export async function startLoopbackReceiver(
     try {
       const target = new URL(request.url ?? '/', 'http://127.0.0.1');
       if (request.method !== 'GET' || target.pathname !== '/callback') {
-        response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }).end('Not found');
+        response
+          .writeHead(404, {
+            'content-type': 'text/plain; charset=utf-8',
+            'content-language': getCliLocale(),
+          })
+          .end(cliText('auth.notFound'));
         return;
       }
       assertCallbackState(expectedState, target.searchParams.get('state'));
       const authorizationCode = target.searchParams.get('code');
-      if (!authorizationCode) throw new CliError('Login callback did not include an authorization code.');
+      if (!authorizationCode) throw new CliError(cliText('auth.codeMissing'));
       response
         .writeHead(200, {
           'content-type': 'text/plain; charset=utf-8',
+          'content-language': getCliLocale(),
           'cache-control': 'no-store',
           'x-content-type-options': 'nosniff',
         })
-        .end('Awesome Workflow login completed. You can close this window.');
+        .end(cliText('auth.completed'));
       settle({ code: authorizationCode });
     } catch (error) {
       response
         .writeHead(400, {
           'content-type': 'text/plain; charset=utf-8',
+          'content-language': getCliLocale(),
           'cache-control': 'no-store',
           'x-content-type-options': 'nosniff',
         })
-        .end('Authorization response rejected. Return to the terminal.');
-      settle({ error: error instanceof Error ? error : new CliError('Authorization response rejected.') });
+        .end(cliText('auth.rejected'));
+      settle({ error: error instanceof Error ? error : new CliError(cliText('auth.rejected')) });
     }
   });
   server.on('clientError', (_error, socket) => socket.destroy());
@@ -169,12 +176,9 @@ export async function startLoopbackReceiver(
   const address = server.address();
   if (!address || typeof address === 'string') {
     await closeServer(server);
-    throw new CliError('Unable to allocate a loopback callback port.');
+    throw new CliError(cliText('auth.port'));
   }
-  const timer = setTimeout(
-    () => settle({ error: new CliError('Timed out waiting for the login callback.') }),
-    timeoutMs,
-  );
+  const timer = setTimeout(() => settle({ error: new CliError(cliText('auth.timeout')) }), timeoutMs);
   timer.unref();
 
   return {
@@ -182,7 +186,7 @@ export async function startLoopbackReceiver(
     code,
     close: async () => {
       clearTimeout(timer);
-      if (!settled) settle({ error: new CliError('Login callback listener closed.') });
+      if (!settled) settle({ error: new CliError(cliText('auth.closed')) });
       await closeServer(server);
     },
   };
@@ -190,25 +194,33 @@ export async function startLoopbackReceiver(
 
 async function requestCliAuthorization(
   api: ApiClient,
-  input: { redirectUri: string; codeChallenge: string; codeChallengeMethod: 'S256'; state: string },
+  input: {
+    redirectUri: string;
+    codeChallenge: string;
+    codeChallengeMethod: 'S256';
+    state: string;
+    locale: 'en-US' | 'zh-CN';
+  },
 ): Promise<string> {
   let value: unknown;
   try {
     value = await api.request<unknown>('POST', '/auth/cli/authorize', input);
   } catch (error) {
     if (error instanceof ApiHttpError && error.status === 404) {
-      throw new CliError(
-        'Server does not support interactive CLI authentication. Required endpoints: /api/v1/auth/cli/authorize and /api/v1/auth/cli/token; the browser cookie flow is intentionally not reused.',
-      );
+      throw new CliError(cliText('auth.interactiveUnsupported'));
     }
     throw error;
   }
   if (!isRecord(value) || typeof value.authorizationUrl !== 'string') {
-    throw new CliError('CLI authorization endpoint returned an invalid response.');
+    throw new CliError(cliText('auth.invalidResponse'));
   }
-  const url = new URL(value.authorizationUrl);
-  if (!['http:', 'https:'].includes(url.protocol))
-    throw new CliError('CLI authorization URL must use HTTP(S).');
+  let url: URL;
+  try {
+    url = new URL(value.authorizationUrl);
+  } catch {
+    throw new CliError(cliText('auth.invalidUrl'));
+  }
+  if (!['http:', 'https:'].includes(url.protocol)) throw new CliError(cliText('auth.invalidUrl'));
   return url.toString();
 }
 
@@ -220,9 +232,7 @@ async function exchangeCliCode(
     return parseSession(await api.request<unknown>('POST', '/auth/cli/token', input));
   } catch (error) {
     if (error instanceof ApiHttpError && error.status === 404) {
-      throw new CliError(
-        'Server does not support CLI token exchange. Required endpoint: /api/v1/auth/cli/token.',
-      );
+      throw new CliError(cliText('auth.tokenUnsupported'));
     }
     throw error;
   }
@@ -230,13 +240,11 @@ async function exchangeCliCode(
 
 function parseSession(value: unknown): AuthSessionResult {
   const parsed = AuthSessionResultSchema.safeParse(value);
-  if (!parsed.success) throw new CliError('Authentication endpoint returned an invalid short-lived session.');
+  if (!parsed.success) throw new CliError(cliText('auth.invalidSession'));
   const expiry = new Date(parsed.data.expiresAt).getTime();
   const lifetime = expiry - Date.now();
   if (lifetime <= 30_000 || lifetime > 24 * 60 * 60 * 1_000) {
-    throw new CliError(
-      'Authentication endpoint did not return a short-lived CLI session (maximum lifetime is 24 hours).',
-    );
+    throw new CliError(cliText('auth.sessionLifetime'));
   }
   return parsed.data;
 }
@@ -251,13 +259,7 @@ async function openSystemBrowser(url: string): Promise<void> {
       child.unref();
       resolve();
     });
-    child.once('error', () =>
-      reject(
-        new CliError(
-          'Unable to open the system browser. Open the authorization URL manually using a trusted terminal.',
-        ),
-      ),
-    );
+    child.once('error', () => reject(new CliError(cliText('auth.openBrowser'))));
   });
 }
 

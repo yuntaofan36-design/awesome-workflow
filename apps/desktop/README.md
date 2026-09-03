@@ -65,6 +65,16 @@ session revocation remain target-machine integration checks. Logging out always
 deletes the local keyring entry first; remote bearer revocation additionally
 depends on server endpoint support.
 
+## Locale boundary
+
+The management UI supports `system`, `en-US`, and `zh-CN`. It applies language
+changes locally first, then sends only the resolved locale and bounded fallback
+list through the authenticated `agent_set_locale` command. The user Agent
+persists that snapshot in SQLite. A task copies the current snapshot when it is
+created; Web UI context and Runner environment are read from that immutable
+task copy, so closing the UI, going offline, restarting the Agent, or changing
+the display language cannot silently change an existing run.
+
 Python applets additionally need a Host-managed interpreter. In development,
 set an absolute path before starting Tauri:
 

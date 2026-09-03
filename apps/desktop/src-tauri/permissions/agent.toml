@@ -4,6 +4,11 @@ description = "Read the Agent snapshot and bounded task logs."
 commands.allow = ["agent_snapshot", "read_task_log"]
 
 [[permission]]
+identifier = "agent-locale"
+description = "Persist the resolved UI locale and explicit fallback locales in the Agent."
+commands.allow = ["agent_set_locale"]
+
+[[permission]]
 identifier = "agent-run"
 description = "Run and stop previously installed applets."
 commands.allow = ["run_applet", "stop_task"]

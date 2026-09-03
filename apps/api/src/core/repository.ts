@@ -28,10 +28,10 @@ import type {
   RequestInstallationInput,
   Run,
   RunCancellation,
-  RunClaim,
+  RunClaimIntent,
   Schedule,
+  ScheduleRecordIntent,
   ScheduleSyncQuery,
-  ScheduleSyncResult,
   UpdateScheduleInput,
   ValidationEvidence,
   Workspace,
@@ -102,9 +102,10 @@ export type IdentityInput = {
   platformRoles: CurrentUser['platformRoles'];
 };
 
-export type ApplicationInput = Pick<Application, 'workspaceId' | 'slug' | 'name' | 'summary' | 'kind'> & {
-  createdBy: string;
-};
+export type ApplicationInput = Pick<Application, 'workspaceId' | 'slug' | 'name' | 'summary' | 'kind'> &
+  Partial<Pick<Application, 'defaultLocale' | 'localizations'>> & {
+    createdBy: string;
+  };
 export type ReleaseInput = {
   applicationId: string;
   version: string;
@@ -158,6 +159,28 @@ export type PermissionGrantRequirementInput = {
   deviceId: string;
   releaseId: string;
   now: Date;
+};
+
+export type ScheduleSyncIntentResult =
+  | {
+      kind: 'snapshot';
+      snapshot: { revision: number; schedules: ScheduleRecordIntent[] };
+    }
+  | {
+      kind: 'delta';
+      delta: {
+        fromRevision: number;
+        toRevision: number;
+        upserts: ScheduleRecordIntent[];
+        removedScheduleIds: string[];
+      };
+    };
+
+export type AuthorizedRunClaimRecord = RunClaimIntent & {
+  applicationId: string;
+  releaseId: string;
+  capabilityHash: string;
+  grantExpiresAt: string | null;
 };
 
 export interface PlatformRepository {
@@ -219,13 +242,13 @@ export interface PlatformRepository {
   listSchedules(input: ListSchedulesQuery): Promise<Schedule[]>;
   updateSchedule(id: string, input: UpdateScheduleInput & { actorId: string }): Promise<Schedule>;
   pauseSchedule(id: string, input: PauseScheduleInput & { actorId: string }): Promise<Schedule>;
-  syncSchedules(deviceId: string, input: ScheduleSyncQuery): Promise<ScheduleSyncResult>;
+  syncSchedules(deviceId: string, input: ScheduleSyncQuery): Promise<ScheduleSyncIntentResult>;
 
   createManualRun(input: CreateManualRunInput & { triggeredBy: string }): Promise<Run>;
   getRun(id: string): Promise<Run>;
   listRuns(input: ListRunsQuery): Promise<Run[]>;
   cancelRun(id: string, actorId: string): Promise<Run>;
-  claimRuns(deviceId: string, input: ClaimRunsInput): Promise<RunClaim[]>;
+  claimRuns(deviceId: string, input: ClaimRunsInput): Promise<AuthorizedRunClaimRecord[]>;
   listRunCancellations(deviceId: string): Promise<RunCancellation[]>;
   reportRun(input: ReportRunStatusInput & { runId: string; deviceId: string }): Promise<Run>;
   listAuditEvents(workspaceId: string): Promise<AuditEventRecord[]>;

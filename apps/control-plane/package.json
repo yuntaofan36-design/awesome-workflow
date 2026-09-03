@@ -16,6 +16,7 @@
   "dependencies": {
     "@arco-design/web-react": "^2.66.0",
     "@awesome-workflow/contracts": "workspace:*",
+    "@awesome-workflow/i18n": "workspace:*",
     "@awesome-workflow/manifest-schema": "workspace:*",
     "@awesome-workflow/ui": "workspace:*",
     "@awesome-workflow/web-sdk": "workspace:*",

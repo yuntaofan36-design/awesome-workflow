@@ -17,6 +17,10 @@ export function getTaskContext(environment: NodeJS.ProcessEnv = process.env): De
   const lease = environment.AW_LEASE;
   const rpcEndpoint = environment.AW_RPC_ENDPOINT;
   const workDirectory = environment.AW_WORK_DIRECTORY;
+  const locale = environment.AW_LOCALE === 'zh-CN' ? 'zh-CN' : 'en-US';
+  const fallbackLocales = (environment.AW_FALLBACK_LOCALES ?? '')
+    .split(',')
+    .filter((value): value is 'en-US' | 'zh-CN' => value === 'en-US' || value === 'zh-CN');
   if (
     protocolVersion !== DESKTOP_RPC_PROTOCOL_VERSION ||
     !appId ||
@@ -28,7 +32,16 @@ export function getTaskContext(environment: NodeJS.ProcessEnv = process.env): De
     throw new Error('This process was not started by a compatible Awesome Workflow runner');
   }
 
-  return { protocolVersion, appId, taskId, lease, rpcEndpoint, workDirectory };
+  return {
+    protocolVersion,
+    appId,
+    taskId,
+    lease,
+    rpcEndpoint,
+    workDirectory,
+    locale,
+    fallbackLocales,
+  };
 }
 
 /**

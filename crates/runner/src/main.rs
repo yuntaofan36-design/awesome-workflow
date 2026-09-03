@@ -7,7 +7,9 @@ use std::{
 };
 
 use anyhow::{bail, Context};
-use awesome_workflow_agent::{resolve_contained, RunnerRequest, RuntimeKind, RPC_PROTOCOL_VERSION};
+use awesome_workflow_agent::{
+    authorize_runner_request, resolve_contained, RunnerRequest, RuntimeKind, RPC_PROTOCOL_VERSION,
+};
 use awesome_workflow_runner::filtered_environment;
 
 fn main() -> anyhow::Result<()> {
@@ -18,6 +20,7 @@ fn main() -> anyhow::Result<()> {
         .with_context(|| format!("remove one-time request {}", request_path.display()))?;
     let request: RunnerRequest = serde_json::from_slice(&request_bytes)?;
     validate_request(&request)?;
+    authorize_runner_request(&request).context("authorize Runner launch with the Agent")?;
     let exit_code = execute(&request)?;
     std::process::exit(exit_code);
 }
@@ -44,6 +47,14 @@ fn validate_request(request: &RunnerRequest) -> anyhow::Result<()> {
     }
     if request.lease.len() < 32 {
         bail!("runner lease is missing or malformed");
+    }
+    if !matches!(request.locale.as_str(), "en-US" | "zh-CN")
+        || request
+            .fallback_locales
+            .iter()
+            .any(|locale| !matches!(locale.as_str(), "en-US" | "zh-CN"))
+    {
+        bail!("runner locale is unsupported");
     }
     request.manifest.runtime_for(request.target)?;
     ensure_contained_existing(&request.work_dir, &request.log_path)?;
@@ -98,6 +109,8 @@ fn execute(request: &RunnerRequest) -> anyhow::Result<i32> {
         .env("AW_LEASE", &request.lease)
         .env("AW_RPC_ENDPOINT", &request.rpc_endpoint)
         .env("AW_WORK_DIRECTORY", &request.work_dir)
+        .env("AW_LOCALE", &request.locale)
+        .env("AW_FALLBACK_LOCALES", request.fallback_locales.join(","))
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));

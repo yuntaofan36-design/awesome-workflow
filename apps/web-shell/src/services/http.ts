@@ -1,3 +1,5 @@
+import { useShellStore } from '../stores/shellStore';
+
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? '/api/v1').replace(/\/$/, '');
 
 export function apiUrl(path: string): string {
@@ -15,10 +17,13 @@ export class ApiError extends Error {
 }
 
 export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  if (!headers.has('content-type')) headers.set('content-type', 'application/json');
+  headers.set('accept-language', useShellStore.getState().localeSnapshot.locale);
   const response = await fetch(apiUrl(path), {
     ...init,
     credentials: 'include',
-    headers: { 'content-type': 'application/json', ...init?.headers },
+    headers,
   });
   const body = response.status === 204 ? undefined : await response.json().catch(() => undefined);
   if (!response.ok) {

@@ -1,12 +1,13 @@
 import { create } from 'zustand';
 
+import { normalizeUiError, type UiError } from '@/i18n/errors';
 import { desktopHost } from '@/services/desktopHost';
 import type { AgentSnapshot, AppletManifest } from '@/types';
 
 type DesktopState = {
   snapshot: AgentSnapshot | null;
   loading: boolean;
-  error: string | null;
+  error: UiError | null;
   validatedManifest: AppletManifest | null;
   refresh: () => Promise<void>;
   run: (appId: string, version?: string) => Promise<void>;
@@ -25,7 +26,7 @@ export const useDesktopStore = create<DesktopState>()((set, get) => ({
     try {
       set({ snapshot: await desktopHost.snapshot(), loading: false });
     } catch (error) {
-      set({ error: describe(error), loading: false });
+      set({ error: normalizeUiError(error, 'agent_snapshot_failed'), loading: false });
     }
   },
   run: async (appId, version) => {
@@ -34,7 +35,7 @@ export const useDesktopStore = create<DesktopState>()((set, get) => ({
       await desktopHost.runApplet(appId, version);
       await get().refresh();
     } catch (error) {
-      set({ error: describe(error), loading: false });
+      set({ error: normalizeUiError(error, 'applet_run_failed'), loading: false });
     }
   },
   stop: async (taskId) => {
@@ -43,7 +44,7 @@ export const useDesktopStore = create<DesktopState>()((set, get) => ({
       await desktopHost.stopTask(taskId);
       await get().refresh();
     } catch (error) {
-      set({ error: describe(error), loading: false });
+      set({ error: normalizeUiError(error, 'task_stop_failed'), loading: false });
     }
   },
   validateDirectory: async (path) => {
@@ -51,7 +52,7 @@ export const useDesktopStore = create<DesktopState>()((set, get) => ({
     try {
       set({ validatedManifest: await desktopHost.validateDevelopmentApplet(path), loading: false });
     } catch (error) {
-      set({ error: describe(error), loading: false });
+      set({ error: normalizeUiError(error, 'applet_validation_failed'), loading: false });
     }
   },
   registerDirectory: async (path) => {
@@ -60,12 +61,13 @@ export const useDesktopStore = create<DesktopState>()((set, get) => ({
       await desktopHost.registerDevelopmentApplet(path);
       await get().refresh();
     } catch (error) {
-      set({ error: describe(error), loading: false });
+      set({
+        error: normalizeUiError(error, 'development_applet_registration_failed'),
+        loading: false,
+      });
     }
   },
 }));
-
-const describe = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 export const selectSnapshot = (state: DesktopState) => state.snapshot;
 export const selectDesktopLoading = (state: DesktopState) => state.loading;

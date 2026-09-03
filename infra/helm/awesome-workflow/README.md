@@ -11,6 +11,9 @@ Create the secret named by `global.existingSecret` with these exact keys:
 - `SESSION_SECRET`
 - `OTP_PEPPER`
 - `WORKER_CALLBACK_TOKEN`
+- `AUTHORIZATION_LEASE_SIGNING_PRIVATE_KEY`, containing a canonical Base64
+  Ed25519 32-byte seed. Its public counterpart is distributed to Agents; the
+  private seed must never be placed in a desktop bundle.
 - `S3_ACCESS_KEY_ID`
 - `S3_SECRET_ACCESS_KEY`
 - `OIDC_CLIENT_ID`
@@ -18,10 +21,19 @@ Create the secret named by `global.existingSecret` with these exact keys:
 - `RELEASE_SIGNING_PUBLIC_KEYS`, containing a JSON map or comma-separated
   `keyId=raw-base64-public-key` pairs
 
+To activate administrator account/password login, add both
+`AUTH_PASSWORD_ADMIN_EMAIL` and `AUTH_PASSWORD_ADMIN_PASSWORD` to the same
+Secret. Omit both to keep that Provider disabled; never put the password in
+`values.yaml` or a ConfigMap.
+
 When the SMTP relay requires authentication, add both `SMTP_USER` and
 `SMTP_PASSWORD`; omit both only for an intentionally trusted relay. If
 `config.api.emailDelivery` is `webhook`, also add `EMAIL_WEBHOOK_TOKEN`. Never
 store any of these values in `values.yaml`.
+
+Set `config.api.authorizationLeaseSigningKeyId` to the identifier of that
+signing key and keep `config.api.authorizationLeaseTtlSeconds` between 60 and 86400. Key rotation must publish the matching Agent trust material before the
+API begins issuing leases with the new key id.
 
 `S3_ENDPOINT` is the private endpoint used for verification and Worker
 downloads. `S3_PUBLIC_ENDPOINT` is the browser-resolvable endpoint used when

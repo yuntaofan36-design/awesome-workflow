@@ -5,6 +5,7 @@ import type {
   CatalogItemSummary,
   HostApi,
   HostEventName,
+  LocaleSnapshot,
   RouteSnapshot,
   ThemeSnapshot,
   UserSummary,
@@ -15,9 +16,10 @@ import { isBridgeRequestEnvelope } from '@awesome-workflow/web-sdk';
 import type { CatalogEntry } from '../types/catalog';
 import type { HostEventBus } from './eventBus';
 
-type HostServices = {
+export type HostServices = {
   catalog: (channel?: 'canary' | 'dev' | 'stable') => Promise<readonly CatalogEntry[]>;
   events: HostEventBus;
+  locale: () => LocaleSnapshot;
   navigate: (to: string, options?: { replace?: boolean }) => void;
   notify: (message: string, level: 'error' | 'info' | 'success' | 'warning') => void;
   route: () => RouteSnapshot;
@@ -25,6 +27,44 @@ type HostServices = {
   user: () => UserSummary;
   workspace: () => WorkspaceSummary;
 };
+
+export type ScopedHostApiBinding = {
+  readonly host: HostApi;
+  update: (services: HostServices) => void;
+};
+
+/**
+ * Keeps the Host API object stable for one immutable release while allowing
+ * locale, theme, route and principal summaries to be read from the latest
+ * Shell render. Runtime components may therefore subscribe once without
+ * receiving stale context or being remounted for presentation-only changes.
+ */
+export function createScopedHostApiBinding(
+  entry: CatalogEntry,
+  initialServices: HostServices,
+): ScopedHostApiBinding {
+  let currentServices = initialServices;
+  const host = createScopedHostApi(entry, {
+    catalog: (channel) => currentServices.catalog(channel),
+    // Event subscriptions must remain on the bus used when the runtime scope
+    // was created. AppRuntimePage creates a new binding if that bus changes.
+    events: initialServices.events,
+    locale: () => currentServices.locale(),
+    navigate: (to, options) => currentServices.navigate(to, options),
+    notify: (message, level) => currentServices.notify(message, level),
+    route: () => currentServices.route(),
+    theme: () => currentServices.theme(),
+    user: () => currentServices.user(),
+    workspace: () => currentServices.workspace(),
+  });
+
+  return {
+    host,
+    update: (services) => {
+      currentServices = services;
+    },
+  };
+}
 
 export function createScopedHostApi(entry: CatalogEntry, services: HostServices): HostApi {
   const capabilities = new Set<string>(entry.manifest.runtime === 'link' ? [] : entry.manifest.capabilities);
@@ -63,6 +103,12 @@ export function createScopedHostApi(entry: CatalogEntry, services: HostServices)
         services.navigate(assertInternalRoute(to), options);
       },
     },
+    locale: {
+      getCurrent: async () => {
+        requireCapability('context.read');
+        return services.locale();
+      },
+    },
     route: {
       getCurrent: async () => {
         requireCapability('context.read');
@@ -92,7 +138,7 @@ export function createScopedHostApi(entry: CatalogEntry, services: HostServices)
 
 export function serveHostApi(port: MessagePort, api: HostApi): () => void {
   const unsubscribers: Array<() => void> = [];
-  for (const event of ['route.changed', 'theme.changed', 'workspace.changed'] as const) {
+  for (const event of ['locale.changed', 'route.changed', 'theme.changed', 'workspace.changed'] as const) {
     try {
       unsubscribers.push(
         api.events.on(event, (payload) => port.postMessage({ event, kind: 'event', payload })),
@@ -136,6 +182,8 @@ async function dispatchBridgeRequest(api: HostApi, request: BridgeRequestEnvelop
       return api.theme.getCurrent();
     case 'route.getCurrent':
       return api.route.getCurrent();
+    case 'locale.getCurrent':
+      return api.locale.getCurrent();
     case 'navigation.navigate': {
       const params = expectRecord(request.params);
       const options = params.options === undefined ? undefined : expectRecord(params.options);

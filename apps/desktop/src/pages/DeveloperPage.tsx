@@ -3,6 +3,9 @@ import { Alert, Button, Input, Message, Steps, Tag } from '@arco-design/web-reac
 import { IconFile, IconFolder, IconSend } from '@arco-design/web-react/icon';
 
 import { desktopHost } from '@/services/desktopHost';
+import { capabilityLabel, platformLabel, runtimeLabel } from '@/i18n/domain';
+import { formatUiError, normalizeUiError } from '@/i18n/errors';
+import { useLocale } from '@/i18n/localeContext';
 import {
   selectRegisterDirectory,
   selectSnapshot,
@@ -10,10 +13,10 @@ import {
   selectValidatedManifest,
   useDesktopStore,
 } from '@/stores/desktopStore';
-import { capabilityLabel, platformLabel } from '@/types';
 import type { AppletManifest } from '@/types';
 
 export function DeveloperPage() {
+  const { resolveApplicationContent, t } = useLocale();
   const [directory, setDirectory] = useState('');
   const [packagePath, setPackagePath] = useState('');
   const [sha256, setSha256] = useState('');
@@ -21,20 +24,24 @@ export function DeveloperPage() {
   const [keyId, setKeyId] = useState('');
   const [installManifestJson, setInstallManifestJson] = useState('');
   const manifest = useDesktopStore(selectValidatedManifest);
+  const localizedManifest = manifest ? resolveApplicationContent(manifest, manifest.localizations) : null;
   const installManifest = parseInstallManifest(installManifestJson);
   const validate = useDesktopStore(selectValidateDirectory);
   const register = useDesktopStore(selectRegisterDirectory);
   const snapshot = useDesktopStore(selectSnapshot);
 
   const chooseDirectory = async () => {
-    const selected = await desktopHost.chooseDirectory();
+    const selected = await desktopHost.chooseDirectory(t('developer.chooseDirectoryDialog'));
     if (selected) {
       setDirectory(selected);
       await validate(selected);
     }
   };
   const choosePackage = async () => {
-    const selected = await desktopHost.choosePackage();
+    const selected = await desktopHost.choosePackage(
+      t('developer.choosePackageDialog'),
+      t('developer.packageFilter'),
+    );
     if (selected) setPackagePath(selected);
   };
 
@@ -43,101 +50,97 @@ export function DeveloperPage() {
       <header className="page-lead">
         <div>
           <span>04</span>
-          <p>BUILD / TEST / SHIP</p>
+          <p>{t('developer.eyebrow')}</p>
         </div>
-        <h1>Developer bay</h1>
-        <p>
-          Local folders are linked only in developer mode. Production installation requires a separately
-          signed Catalog manifest and package attestation; package metadata never upgrades its own trust.
-        </p>
+        <h1>{t('developer.title')}</h1>
+        <p>{t('developer.description')}</p>
       </header>
-      {!snapshot?.developerMode && (
-        <Alert
-          type="info"
-          content="Production mode installs only approved Control Plane releases. Local package paths, digests and signatures are intentionally unavailable here."
-        />
-      )}
+      {!snapshot?.developerMode && <Alert type="info" content={t('developer.productionOnly')} />}
       {snapshot?.developerMode && (
         <div className="developer-grid">
           <article className="surface developer-card">
             <div className="surface-heading">
               <div>
-                <p>LOCAL LOOP</p>
-                <h2>Link an applet directory</h2>
+                <p>{t('developer.localLoop')}</p>
+                <h2>{t('developer.linkTitle')}</h2>
               </div>
-              <Tag color="orange">DEV ONLY</Tag>
+              <Tag color="orange">{t('developer.devOnly')}</Tag>
             </div>
             <div className="path-picker">
               <Input
                 value={directory}
                 onChange={setDirectory}
-                placeholder="Directory containing applet.json"
+                placeholder={t('developer.directoryPlaceholder')}
                 prefix={<IconFolder />}
               />
-              <Button onClick={() => void chooseDirectory()}>Browse</Button>
+              <Button onClick={() => void chooseDirectory()}>{t('common.browse')}</Button>
             </div>
             {manifest ? (
               <div className="manifest-preview">
                 <div>
-                  <strong>{manifest.name}</strong>
+                  <strong>{localizedManifest?.name}</strong>
                   <code>
                     {manifest.appId}@{manifest.version}
                   </code>
                 </div>
                 <span>
                   {manifest.runtimes
-                    .map((runtime) => `${platformLabel(runtime.platform)}/${runtime.kind}`)
+                    .map(
+                      (runtime) => `${platformLabel(runtime.platform, t)}/${runtimeLabel(runtime.kind, t)}`,
+                    )
                     .join(' · ')}
                 </span>
                 <div>
                   {manifest.capabilities.map((capability, capabilityIndex) => (
-                    <Tag key={`${capability.kind}-${capabilityIndex}`}>{capabilityLabel(capability)}</Tag>
+                    <Tag key={`${capability.kind}-${capabilityIndex}`}>{capabilityLabel(capability, t)}</Tag>
                   ))}
                 </div>
               </div>
             ) : (
-              <div className="drop-hint">
-                Choose a directory to validate manifest paths and target matching.
-              </div>
+              <div className="drop-hint">{t('developer.chooseDirectoryHint')}</div>
             )}
             <Button
               type="primary"
               disabled={!manifest || !directory}
               onClick={() =>
-                void register(directory).then(() => Message.success('Development applet linked'))
+                void register(directory).then(() => Message.success(t('developer.linkedMessage')))
               }
             >
-              Link & activate
+              {t('developer.linkActivate')}
             </Button>
           </article>
 
           <article className="surface developer-card">
             <div className="surface-heading">
               <div>
-                <p>LOCAL INSTALL</p>
-                <h2>Install a signed package</h2>
+                <p>{t('developer.localInstall')}</p>
+                <h2>{t('developer.installTitle')}</h2>
               </div>
-              <Tag color="green">FAIL CLOSED</Tag>
+              <Tag color="green">{t('developer.failClosed')}</Tag>
             </div>
             <div className="path-picker">
               <Input
                 value={packagePath}
                 onChange={setPackagePath}
-                placeholder="Signed .awpkg"
+                placeholder={t('developer.packagePlaceholder')}
                 prefix={<IconFile />}
               />
-              <Button onClick={() => void choosePackage()}>Browse</Button>
+              <Button onClick={() => void choosePackage()}>{t('common.browse')}</Button>
             </div>
-            <Input value={sha256} onChange={setSha256} placeholder="SHA-256 digest (64 hex characters)" />
+            <Input value={sha256} onChange={setSha256} placeholder={t('developer.digestPlaceholder')} />
             <div className="field-pair">
-              <Input value={keyId} onChange={setKeyId} placeholder="Signing key ID" />
-              <Input value={signature} onChange={setSignature} placeholder="Ed25519 signature (base64)" />
+              <Input value={keyId} onChange={setKeyId} placeholder={t('developer.keyIdPlaceholder')} />
+              <Input
+                value={signature}
+                onChange={setSignature}
+                placeholder={t('developer.signaturePlaceholder')}
+              />
             </div>
             <Input.TextArea
               value={installManifestJson}
               onChange={setInstallManifestJson}
               autoSize={{ minRows: 4, maxRows: 8 }}
-              placeholder="Signed catalog manifest JSON (delivered separately from the .awpkg)"
+              placeholder={t('developer.manifestPlaceholder')}
             />
             <Button
               type="primary"
@@ -146,11 +149,13 @@ export function DeveloperPage() {
                 installManifest &&
                 void desktopHost
                   .installSignedPackage({ packagePath, sha256, signature, keyId, manifest: installManifest })
-                  .then(() => Message.success('Signed package installed'))
-                  .catch((error: unknown) => Message.error(String(error)))
+                  .then(() => Message.success(t('developer.installedMessage')))
+                  .catch((error: unknown) =>
+                    Message.error(formatUiError(normalizeUiError(error, 'signed_package_install_failed'), t)),
+                  )
               }
             >
-              Verify manifest, package & install
+              {t('developer.verifyInstall')}
             </Button>
           </article>
         </div>
@@ -159,29 +164,29 @@ export function DeveloperPage() {
       <article className="surface publish-card">
         <div className="surface-heading">
           <div>
-            <p>CONTROL PLANE</p>
-            <h2>Publish immutable release metadata</h2>
+            <p>{t('developer.controlPlane')}</p>
+            <h2>{t('developer.publishTitle')}</h2>
           </div>
           <IconSend />
         </div>
         <Steps current={2} size="small">
-          <Steps.Step title="Package" description="awpkg + digest" />
-          <Steps.Step title="Sign" description="CI / trusted key" />
-          <Steps.Step title="Publish" description="dev channel" />
-          <Steps.Step title="Promote" description="canary → stable" />
+          <Steps.Step
+            title={t('developer.steps.package')}
+            description={t('developer.steps.packageDescription')}
+          />
+          <Steps.Step title={t('developer.steps.sign')} description={t('developer.steps.signDescription')} />
+          <Steps.Step
+            title={t('developer.steps.publish')}
+            description={t('developer.steps.publishDescription')}
+          />
+          <Steps.Step
+            title={t('developer.steps.promote')}
+            description={t('developer.steps.promoteDescription')}
+          />
         </Steps>
-        <Alert
-          type="info"
-          content={
-            <>
-              Use <code>aw package</code> and <code>aw publish</code>, or the Web Control Plane, for the real
-              presigned upload, validation, review and promotion workflow. The desktop UI does not emulate
-              that state machine.
-            </>
-          }
-        />
+        <Alert type="info" content={<>{t('developer.publishDescription')}</>} />
         <Button type="primary" disabled>
-          Desktop uploader planned
+          {t('developer.uploaderPlanned')}
         </Button>
       </article>
     </section>

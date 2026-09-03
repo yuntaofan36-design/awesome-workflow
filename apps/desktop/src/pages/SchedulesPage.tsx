@@ -1,34 +1,30 @@
 import { Alert, Progress, Tag } from '@arco-design/web-react';
 
+import { useLocale } from '@/i18n/localeContext';
 import { selectSnapshot, useDesktopStore } from '@/stores/desktopStore';
 
 export function SchedulesPage() {
+  const { formatNumber, t } = useLocale();
   const sync = useDesktopStore(selectSnapshot)?.sync;
   return (
     <section className="page-stack">
       <header className="page-lead">
         <div>
           <span>05</span>
-          <p>REVISIONED LOCAL EXECUTION</p>
+          <p>{t('schedules.eyebrow')}</p>
         </div>
-        <h1>Schedule mirror</h1>
-        <p>
-          The server owns schedule intent. The Agent stores only the newest monotonic snapshot and explicitly
-          marks stale connectivity as offline.
-        </p>
+        <h1>{t('schedules.title')}</h1>
+        <p>{t('schedules.description')}</p>
       </header>
-      {sync?.offline && (
-        <Alert
-          type="warning"
-          content="Agent is offline. Existing local schedules remain visible, but no stale snapshot can overwrite a newer revision."
-        />
-      )}
+      {sync?.offline && <Alert type="warning" content={t('schedules.offlineWarning')} />}
       <div className="schedule-layout">
         <article className="surface revision-card">
-          <p>CURRENT REVISION</p>
-          <strong>{String(sync?.revision ?? 0).padStart(4, '0')}</strong>
+          <p>{t('schedules.currentRevision')}</p>
+          <strong>
+            {formatNumber(sync?.revision ?? 0, { minimumIntegerDigits: 4, useGrouping: false })}
+          </strong>
           <Tag color={sync?.offline ? 'orange' : 'green'}>
-            {sync?.offline ? 'OFFLINE CACHE' : 'SERVER CONFIRMED'}
+            {sync?.offline ? t('schedules.offlineCache') : t('schedules.serverConfirmed')}
           </Tag>
           <Progress
             percent={sync?.offline ? 38 : 100}
@@ -37,23 +33,23 @@ export function SchedulesPage() {
           />
         </article>
         <article className="surface schedule-contract">
-          <p>SYNC CONTRACT</p>
+          <p>{t('schedules.syncContract')}</p>
           <ol>
             <li>
               <b>01</b>
-              <span>Fetch snapshot with revision</span>
+              <span>{t('schedules.steps.fetch')}</span>
             </li>
             <li>
               <b>02</b>
-              <span>Reject revision ≤ local revision</span>
+              <span>{t('schedules.steps.reject')}</span>
             </li>
             <li>
               <b>03</b>
-              <span>Commit schedules + revision atomically</span>
+              <span>{t('schedules.steps.commit')}</span>
             </li>
             <li>
               <b>04</b>
-              <span>Run through the same lease-bound Agent path</span>
+              <span>{t('schedules.steps.run')}</span>
             </li>
           </ol>
         </article>

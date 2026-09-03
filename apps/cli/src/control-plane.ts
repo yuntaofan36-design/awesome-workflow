@@ -1,6 +1,7 @@
 import type { CatalogEntry, ReleaseChannelName, ReleaseStatusView } from '@awesome-workflow/contracts';
 
 import { ApiClient, type UploadTarget } from './api-client.js';
+import { cliText } from './i18n.js';
 import { readPackageMetadata } from './package-release.js';
 import { CliError, isRecord } from './safety.js';
 
@@ -29,7 +30,7 @@ export async function publishPackagedRelease(options: {
       sbom: packaged.artifacts[0]!.metadata.sbom.primary.descriptor,
     },
   );
-  const releaseId = readId(createdRelease, 'release');
+  const releaseId = readId(createdRelease, cliText('label.release'));
   for (const packagedArtifact of packaged.artifacts) {
     const artifact = packagedArtifact.metadata;
     const intentValue = await options.api.request<unknown>(
@@ -45,8 +46,12 @@ export async function publishPackagedRelease(options: {
       },
     );
     const intent = parseUploadIntent(intentValue);
-    const artifactEtag = await options.api.upload(intent.upload, packagedArtifact.artifactBytes, 'artifact');
-    await options.api.upload(intent.sbomUpload, packagedArtifact.sbomBytes, 'SBOM');
+    const artifactEtag = await options.api.upload(
+      intent.upload,
+      packagedArtifact.artifactBytes,
+      cliText('label.artifact'),
+    );
+    await options.api.upload(intent.sbomUpload, packagedArtifact.sbomBytes, cliText('label.sbom'));
     await options.api.request<unknown>(
       'POST',
       `/artifacts/${encodeURIComponent(intent.artifactId)}/finalize`,
@@ -73,13 +78,11 @@ export async function promoteRelease(options: {
   let expected = options.expectedCurrentReleaseId;
   if (expected === undefined) {
     if (!options.workspaceId) {
-      throw new CliError(
-        'Promotion requires --expected-current-release-id, --expected-none, or --workspace-id to derive the current channel revision.',
-      );
+      throw new CliError(cliText('control.expectedRevision'));
     }
     const query = new URLSearchParams({ workspaceId: options.workspaceId, channel: options.channel });
     const catalog = await options.api.request<unknown>('GET', `/catalog?${query.toString()}`);
-    if (!Array.isArray(catalog)) throw new CliError('Catalog response is invalid.');
+    if (!Array.isArray(catalog)) throw new CliError(cliText('control.catalogResponse'));
     const current = catalog.find(
       (entry): entry is CatalogEntry => isRecord(entry) && entry.applicationId === options.applicationId,
     );
@@ -90,7 +93,7 @@ export async function promoteRelease(options: {
     `/applications/${encodeURIComponent(options.applicationId)}/channels/${encodeURIComponent(options.channel)}/promote`,
     { releaseId: options.releaseId, expectedCurrentReleaseId: expected },
   );
-  if (!isRecord(promoted)) throw new CliError('Promotion response is invalid.');
+  if (!isRecord(promoted)) throw new CliError(cliText('control.promotionResponse'));
   return {
     applicationId:
       typeof promoted.applicationId === 'string' ? promoted.applicationId : options.applicationId,
@@ -115,7 +118,7 @@ export async function releaseStatus(options: { api: ApiClient; releaseId: string
     !Array.isArray(value.artifacts) ||
     !Array.isArray(value.reviews)
   ) {
-    throw new CliError('Release status response is invalid.');
+    throw new CliError(cliText('control.releaseStatusResponse'));
   }
   return {
     release: {
@@ -124,11 +127,11 @@ export async function releaseStatus(options: { api: ApiClient; releaseId: string
       status: readString(value.release, 'status'),
     },
     artifacts: value.artifacts.map((artifact) => {
-      if (!isRecord(artifact)) throw new CliError('Release artifact status is invalid.');
+      if (!isRecord(artifact)) throw new CliError(cliText('control.artifactStatusResponse'));
       return { fileName: readString(artifact, 'fileName'), status: readString(artifact, 'status') };
     }),
     reviews: value.reviews.map((review) => {
-      if (!isRecord(review)) throw new CliError('Release review status is invalid.');
+      if (!isRecord(review)) throw new CliError(cliText('control.reviewStatusResponse'));
       return { decision: readString(review, 'decision'), createdAt: readString(review, 'createdAt') };
     }),
   };
@@ -139,14 +142,14 @@ function parseUploadIntent(value: unknown): {
   upload: UploadTarget;
   sbomUpload: UploadTarget;
 } {
-  if (!isRecord(value) || !isRecord(value.artifact)) throw new CliError('Artifact upload intent is invalid.');
-  const upload = parseUploadTarget(value.upload, 'artifact');
-  if (!Object.hasOwn(value, 'sbomUpload')) {
-    throw new CliError(
-      'Server did not provide an SBOM upload intent. Publishing stopped before finalize; the current release API cannot safely accept this package.',
-    );
+  if (!isRecord(value) || !isRecord(value.artifact)) {
+    throw new CliError(cliText('control.uploadIntent'));
   }
-  const sbomUpload = parseUploadTarget(value.sbomUpload, 'SBOM');
+  const upload = parseUploadTarget(value.upload, cliText('label.artifact'));
+  if (!Object.hasOwn(value, 'sbomUpload')) {
+    throw new CliError(cliText('control.sbomIntentMissing'));
+  }
+  const sbomUpload = parseUploadTarget(value.sbomUpload, cliText('label.sbom'));
   return { artifactId: readString(value.artifact, 'id'), upload, sbomUpload };
 }
 
@@ -158,38 +161,38 @@ function parseUploadTarget(value: unknown, label: string): UploadTarget {
     !isRecord(value.headers) ||
     typeof value.expiresAt !== 'string'
   ) {
-    throw new CliError(`${label} upload intent is invalid.`);
+    throw new CliError(cliText('control.targetIntent', { label }));
   }
   const headers: Record<string, string> = {};
   for (const [key, header] of Object.entries(value.headers)) {
-    if (typeof header !== 'string') throw new CliError(`${label} upload headers are invalid.`);
+    if (typeof header !== 'string') throw new CliError(cliText('control.targetHeaders', { label }));
     headers[key] = header;
   }
   let url: URL;
   try {
     url = new URL(value.url);
   } catch {
-    throw new CliError(`${label} upload URL is invalid.`);
+    throw new CliError(cliText('control.targetUrl', { label }));
   }
   if (!['http:', 'https:'].includes(url.protocol))
-    throw new CliError(`${label} upload URL must use HTTP(S).`);
+    throw new CliError(cliText('control.targetProtocol', { label }));
   const expiry = new Date(value.expiresAt);
   if (!Number.isFinite(expiry.getTime()) || expiry.getTime() <= Date.now()) {
-    throw new CliError(`${label} upload intent is already expired.`);
+    throw new CliError(cliText('control.targetExpired', { label }));
   }
   return { method: 'PUT', url: url.toString(), headers, expiresAt: value.expiresAt };
 }
 
 function summarizeReleaseStatus(value: unknown, releaseId: string, version: string): PublishSummary {
   if (!isRecord(value) || !isRecord(value.release) || !Array.isArray(value.artifacts)) {
-    throw new CliError('Submit response is invalid.');
+    throw new CliError(cliText('control.submitResponse'));
   }
   return {
     releaseId: readString(value.release, 'id', releaseId),
     version: readString(value.release, 'version', version),
     status: readString(value.release, 'status'),
     artifacts: value.artifacts.map((artifact) => {
-      if (!isRecord(artifact)) throw new CliError('Submit artifact response is invalid.');
+      if (!isRecord(artifact)) throw new CliError(cliText('control.submitArtifactResponse'));
       return { fileName: readString(artifact, 'fileName'), status: readString(artifact, 'status') };
     }),
   };
@@ -197,7 +200,7 @@ function summarizeReleaseStatus(value: unknown, releaseId: string, version: stri
 
 function readId(value: unknown, label: string): string {
   if (!isRecord(value) || typeof value.id !== 'string' || !value.id) {
-    throw new CliError(`Create ${label} response did not include an id.`);
+    throw new CliError(cliText('control.createIdResponse', { label }));
   }
   return value.id;
 }
@@ -206,5 +209,5 @@ function readString(value: Record<string, unknown>, key: string, fallback?: stri
   const candidate = value[key];
   if (typeof candidate === 'string') return candidate;
   if (fallback !== undefined) return fallback;
-  throw new CliError(`Response field ${key} is missing.`);
+  throw new CliError(cliText('control.responseField', { key }));
 }

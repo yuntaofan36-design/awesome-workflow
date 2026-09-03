@@ -1,8 +1,9 @@
 use std::{env, path::PathBuf, sync::Arc};
 
 use awesome_workflow_agent::{
-    run_agent_daemon, Agent, AgentConfig, AgentEndpoint, Ed25519Verifier, RejectUnsignedVerifier,
-    SignatureVerifier, TargetPlatform,
+    run_agent_daemon, Agent, AgentConfig, AgentEndpoint, AuthorizationLeaseVerifier,
+    Ed25519AuthorizationLeaseVerifier, Ed25519Verifier, RejectAuthorizationLeases,
+    RejectUnsignedVerifier, SignatureVerifier, TargetPlatform,
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
 use ed25519_dalek::VerifyingKey;
@@ -25,8 +26,32 @@ fn main() -> anyhow::Result<()> {
         developer_mode: env::var("AW_DEVELOPER_MODE").as_deref() == Ok("1")
             || cfg!(debug_assertions),
     })?);
-    run_agent_daemon(endpoint, agent, load_signature_verifier())?;
+    run_agent_daemon(
+        endpoint,
+        agent,
+        load_signature_verifier(),
+        load_authorization_lease_verifier(),
+    )?;
     Ok(())
+}
+
+fn load_authorization_lease_verifier() -> Arc<dyn AuthorizationLeaseVerifier> {
+    let Ok(key_id) = env::var("AW_AUTHORIZATION_LEASE_KEY_ID") else {
+        return Arc::new(RejectAuthorizationLeases);
+    };
+    let Ok(encoded_key) = env::var("AW_AUTHORIZATION_LEASE_PUBLIC_KEY") else {
+        return Arc::new(RejectAuthorizationLeases);
+    };
+    let Ok(bytes) = STANDARD.decode(encoded_key) else {
+        return Arc::new(RejectAuthorizationLeases);
+    };
+    let Ok(bytes) = <[u8; 32]>::try_from(bytes) else {
+        return Arc::new(RejectAuthorizationLeases);
+    };
+    let Ok(key) = VerifyingKey::from_bytes(&bytes) else {
+        return Arc::new(RejectAuthorizationLeases);
+    };
+    Arc::new(Ed25519AuthorizationLeaseVerifier { key_id, key })
 }
 
 fn load_signature_verifier() -> Arc<dyn SignatureVerifier> {

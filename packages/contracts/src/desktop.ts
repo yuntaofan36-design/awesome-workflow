@@ -31,6 +31,91 @@ const ErrorCodeSchema = z
   .regex(/^[a-z][a-z0-9_]*$/);
 const RunResultSchema = z.record(z.string(), z.unknown());
 
+/**
+ * Server-authoritative, bounded authorization for work that may start while a
+ * device is offline. The signature covers the complete claims object; the
+ * local Agent still issues a separate opaque task lease for Runner/RPC use.
+ */
+export const AuthorizationLeaseTaskSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('schedule'), id: UuidSchema }),
+  z.object({ kind: z.literal('run'), id: UuidSchema }),
+]);
+export type AuthorizationLeaseTask = z.infer<typeof AuthorizationLeaseTaskSchema>;
+
+export const AuthorizationLeaseClaimsSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    leaseId: UuidSchema,
+    revision: PositiveRevisionSchema,
+    deviceId: UuidSchema,
+    applicationId: UuidSchema,
+    releaseId: UuidSchema,
+    appId: ApplicationSlugSchema,
+    version: SemanticVersionSchema,
+    task: AuthorizationLeaseTaskSchema,
+    capabilityHash: Sha256Schema,
+    intentHash: Sha256Schema,
+    issuedAt: UnixEpochMillisecondsSchema,
+    expiresAt: UnixEpochMillisecondsSchema,
+  })
+  .superRefine((claims, context) => {
+    if (claims.expiresAt <= claims.issuedAt) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['expiresAt'],
+        message: 'Authorization lease expiry must follow issuance',
+      });
+    }
+  });
+export type AuthorizationLeaseClaims = z.infer<typeof AuthorizationLeaseClaimsSchema>;
+
+export const AuthorizationLeaseSignatureSchema = z.object({
+  algorithm: z.literal('ed25519'),
+  keyId: z.string().min(1).max(160),
+  value: z.string().min(40).max(256),
+});
+export type AuthorizationLeaseSignature = z.infer<typeof AuthorizationLeaseSignatureSchema>;
+
+export const AuthorizationLeaseSchema = z.object({
+  claims: AuthorizationLeaseClaimsSchema,
+  signature: AuthorizationLeaseSignatureSchema,
+});
+export type AuthorizationLease = z.infer<typeof AuthorizationLeaseSchema>;
+
+export function canonicalizeAuthorizationLeaseClaims(input: AuthorizationLeaseClaims): string {
+  return authorizationLeaseCanonicalJson(AuthorizationLeaseClaimsSchema.parse(input));
+}
+
+export function authorizationLeaseSignaturePayload(input: AuthorizationLeaseClaims): Uint8Array {
+  return new TextEncoder().encode(
+    `awesome-workflow:authorization-lease:v1\n${canonicalizeAuthorizationLeaseClaims(input)}`,
+  );
+}
+
+/**
+ * Domain-separated canonical bytes hashed by the control plane and recomputed
+ * by the Agent from the complete schedule/run record before offline execution.
+ */
+export function authorizationLeaseIntentPayload(input: unknown): Uint8Array {
+  return new TextEncoder().encode(
+    `awesome-workflow:authorization-intent:v1\n${authorizationLeaseCanonicalJson(input)}`,
+  );
+}
+
+function authorizationLeaseCanonicalJson(value: unknown): string {
+  if (value === undefined) throw new TypeError('Undefined is not valid canonical JSON');
+  if (Array.isArray(value)) return `[${value.map(authorizationLeaseCanonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .map(([key, nested]) => `${JSON.stringify(key)}:${authorizationLeaseCanonicalJson(nested)}`)
+      .join(',')}}`;
+  }
+  const encoded = JSON.stringify(value);
+  if (encoded === undefined) throw new TypeError('Value is not valid canonical JSON');
+  return encoded;
+}
+
 export const DesktopExecutionInputSchema = z.object({
   args: z.array(z.string().max(8_192)).max(256).default([]),
 });
@@ -319,8 +404,11 @@ export const ScheduleListResultSchema = z.array(ScheduleSchema);
 export type ScheduleListResult = z.infer<typeof ScheduleListResultSchema>;
 
 /** Exact JSON shape consumed by the Rust Agent's ScheduleRecord. */
-export const ScheduleRecordSchema = z.object({
+export const ScheduleRecordIntentSchema = z.object({
   scheduleId: UuidSchema,
+  revision: PositiveRevisionSchema,
+  applicationId: UuidSchema,
+  releaseId: UuidSchema,
   appId: ApplicationSlugSchema,
   version: SemanticVersionSchema.optional(),
   cronExpression: ScheduleSchema.shape.cronExpression,
@@ -328,6 +416,28 @@ export const ScheduleRecordSchema = z.object({
   nextRunAtMs: UnixEpochMillisecondsSchema,
   args: DesktopExecutionInputSchema.shape.args,
   enabled: z.boolean(),
+});
+export type ScheduleRecordIntent = z.infer<typeof ScheduleRecordIntentSchema>;
+
+export const ScheduleRecordSchema = ScheduleRecordIntentSchema.extend({
+  authorizationLease: AuthorizationLeaseSchema,
+}).superRefine((record, context) => {
+  const claims = record.authorizationLease.claims;
+  if (
+    claims.task.kind !== 'schedule' ||
+    claims.task.id !== record.scheduleId ||
+    claims.revision !== record.revision ||
+    claims.applicationId !== record.applicationId ||
+    claims.releaseId !== record.releaseId ||
+    claims.appId !== record.appId ||
+    (record.version !== undefined && claims.version !== record.version)
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['authorizationLease', 'claims'],
+      message: 'Authorization lease scope must match its schedule record',
+    });
+  }
 });
 export type ScheduleRecord = z.infer<typeof ScheduleRecordSchema>;
 
@@ -482,13 +592,32 @@ export const ClaimRunsInputSchema = z.object({
 });
 export type ClaimRunsInput = z.infer<typeof ClaimRunsInputSchema>;
 
-export const RunClaimSchema = z.object({
+export const RunClaimIntentSchema = z.object({
   runId: UuidSchema,
   attempt: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   appId: ApplicationSlugSchema,
   version: SemanticVersionSchema,
   args: DesktopExecutionInputSchema.shape.args,
   requiresElevation: z.boolean(),
+});
+export type RunClaimIntent = z.infer<typeof RunClaimIntentSchema>;
+export const RunClaimSchema = RunClaimIntentSchema.extend({
+  authorizationLease: AuthorizationLeaseSchema,
+}).superRefine((claim, context) => {
+  const claims = claim.authorizationLease.claims;
+  if (
+    claims.task.kind !== 'run' ||
+    claims.task.id !== claim.runId ||
+    claims.revision !== claim.attempt ||
+    claims.appId !== claim.appId ||
+    claims.version !== claim.version
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['authorizationLease', 'claims'],
+      message: 'Authorization lease scope must match its run claim',
+    });
+  }
 });
 export type RunClaim = z.infer<typeof RunClaimSchema>;
 export const ClaimRunsResultSchema = z.array(RunClaimSchema);

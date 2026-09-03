@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { getReleaseStatus, listApplications, listPendingReviews, listReleases, reviewRelease } from './api';
+import {
+  ApiProblemError,
+  createWebApplication,
+  getReleaseStatus,
+  listApplications,
+  listPendingReviews,
+  listReleases,
+  reviewRelease,
+} from './api';
 
 const RELEASE_ID = '11111111-1111-4111-8111-111111111111';
 const APPLICATION_ID = '22222222-2222-4222-8222-222222222222';
@@ -95,17 +103,21 @@ describe('release control-plane API', () => {
       slug: 'sample-web',
       name: 'Sample web',
       summary: 'A sample application',
+      defaultLocale: 'en-US',
+      localizations: {},
       kind: 'web',
       createdAt: '2026-09-01T00:00:00.000Z',
     } as const;
     const fetchMock = vi.fn().mockResolvedValue(json({ data: [application] }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(listApplications(workspaceId)).resolves.toEqual([application]);
+    await expect(listApplications(workspaceId, 'zh-CN')).resolves.toEqual([application]);
     expect(fetchMock).toHaveBeenCalledWith(
       `/api/v1/workspaces/${workspaceId}/applications`,
       expect.objectContaining({ credentials: 'include' }),
     );
+    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
+    expect(headers.get('accept-language')).toBe('zh-CN');
   });
 
   it('lists immutable releases and the server-backed pending review queue', async () => {
@@ -116,6 +128,8 @@ describe('release control-plane API', () => {
         slug: 'sample-web',
         name: 'Sample web',
         summary: 'A sample application',
+        defaultLocale: 'en-US',
+        localizations: {},
         kind: 'web',
         createdAt: '2026-09-01T00:00:00.000Z',
       },
@@ -188,6 +202,58 @@ describe('release control-plane API', () => {
         method: 'POST',
       }),
     );
+  });
+
+  it('uses the publisher-selected default locale instead of the current UI locale', async () => {
+    const workspaceId = '66666666-6666-4666-8666-666666666666';
+    const fetchMock = vi.fn().mockResolvedValue(new Response(undefined, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await createWebApplication({
+      defaultLocale: 'zh-CN',
+      locale: 'en-US',
+      localizations: { 'en-US': { name: 'Sample web' } },
+      name: '示例应用',
+      slug: 'sample-web',
+      summary: '示例简介',
+      workspaceId,
+    });
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(init.body as string)).toEqual({
+      defaultLocale: 'zh-CN',
+      kind: 'web',
+      localizations: { 'en-US': { name: 'Sample web' } },
+      name: '示例应用',
+      slug: 'sample-web',
+      summary: '示例简介',
+    });
+    expect((init.headers as Headers).get('accept-language')).toBe('en-US');
+  });
+
+  it('preserves RFC Problem Details and its stable error code', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      json(
+        {
+          code: 'forbidden',
+          detail: 'Server-side fallback detail',
+          status: 403,
+          title: 'Forbidden',
+          type: 'https://awesome-workflow.dev/problems/forbidden',
+        },
+        403,
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const error = await getReleaseStatus(RELEASE_ID, 'zh-CN').catch((reason: unknown) => reason);
+
+    expect(error).toBeInstanceOf(ApiProblemError);
+    expect(error).toMatchObject({
+      code: 'forbidden',
+      problem: expect.objectContaining({ detail: 'Server-side fallback detail' }),
+      status: 403,
+    });
   });
 });
 

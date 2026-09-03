@@ -7,7 +7,7 @@ import { ApiError } from '../services/http';
 type UserStatus = 'anonymous' | 'authenticated' | 'error' | 'idle' | 'loading';
 
 type UserState = {
-  error: string | null;
+  error: unknown;
   initialize: () => Promise<void>;
   setAuthenticated: (user: UserSummary) => void;
   signOut: () => Promise<void>;
@@ -30,7 +30,7 @@ export const useUserStore = create<UserState>((set, get) => ({
         return;
       }
       set({
-        error: error instanceof Error ? error.message : 'Session initialization failed',
+        error,
         status: 'error',
         user: null,
       });

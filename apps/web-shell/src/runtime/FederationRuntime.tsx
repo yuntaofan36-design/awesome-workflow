@@ -1,11 +1,14 @@
-import { Alert, Button, Spin } from '@arco-design/web-react';
+import { Button, Spin } from '@arco-design/web-react';
 import type { HostApi } from '@awesome-workflow/web-sdk';
 import { useEffect, useRef, useState } from 'react';
 
 import type { CatalogEntry, FederationManifest } from '../types/catalog';
+import { LocalizedErrorAlert } from '../components/LocalizedErrorAlert';
+import { useI18n } from '../i18n/I18nProvider';
 import { loadFederationModule } from './federation';
+import { runtimeReleaseKey } from './lifecycle';
 
-type Phase = { error?: string; status: 'error' | 'loading' | 'ready' };
+type Phase = { error?: unknown; status: 'error' | 'loading' | 'ready' };
 
 export function FederationRuntime({
   entry,
@@ -14,9 +17,11 @@ export function FederationRuntime({
   entry: CatalogEntry & { manifest: FederationManifest };
   host: HostApi;
 }) {
+  const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
   const [attempt, setAttempt] = useState(0);
   const [phase, setPhase] = useState<Phase>({ status: 'loading' });
+  const mountKey = runtimeReleaseKey(entry);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -35,8 +40,7 @@ export function FederationRuntime({
         if (!disposed) setPhase({ status: 'ready' });
       })
       .catch((error: unknown) => {
-        if (!disposed)
-          setPhase({ error: error instanceof Error ? error.message : 'Remote load failed', status: 'error' });
+        if (!disposed) setPhase({ error, status: 'error' });
       });
 
     return () => {
@@ -44,19 +48,25 @@ export function FederationRuntime({
       cleanup?.();
       if (loadedModule) void loadedModule.unmount(container);
     };
-  }, [attempt, entry, host]);
+    // Catalog metadata is localized independently. Code is immutable for this
+    // release key, so presentation changes must not run the unmount cleanup.
+  }, [attempt, host, mountKey]);
 
   return (
     <div className="runtime-frame runtime-frame--federation">
       {phase.status === 'loading' && (
         <div className="runtime-overlay">
-          <Spin dot tip="Loading trusted federation remote…" />
+          <Spin dot tip={t('runtime.federationLoading')} />
         </div>
       )}
       {phase.status === 'error' && (
         <div className="runtime-overlay">
-          <Alert type="error" title="Federation remote rejected" content={phase.error} />
-          <Button onClick={() => setAttempt((value) => value + 1)}>Retry</Button>
+          <LocalizedErrorAlert
+            error={phase.error}
+            fallbackKey="errors.hostError"
+            title={t('runtime.federationRejected')}
+          />
+          <Button onClick={() => setAttempt((value) => value + 1)}>{t('common.retry')}</Button>
         </div>
       )}
       <div className="runtime-mount" ref={containerRef} aria-busy={phase.status === 'loading'} />

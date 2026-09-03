@@ -154,6 +154,9 @@
   font-family: var(--aw-font-display);
   font-size: 14px;
 }
+.cp-locale-select {
+  width: 142px;
+}
 .cp-user {
   display: flex;
   align-items: center;
@@ -209,6 +212,14 @@
     10px/1.4 ui-monospace,
     Consolas,
     monospace;
+}
+.cp-app-id__summary {
+  max-width: 360px;
+  overflow: hidden;
+  color: var(--aw-muted);
+  font: 12px/1.45 var(--aw-font-body) !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .cp-release-id,
 .cp-root code {
@@ -434,6 +445,26 @@
   font-weight: 650;
   letter-spacing: 0.04em;
 }
+.cp-form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--aw-line);
+}
+.cp-form-section strong {
+  font: 600 13px/1.4 var(--aw-font-display);
+}
+.cp-form-section small {
+  color: var(--aw-muted);
+  line-height: 1.5;
+}
+.cp-localized-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 16px;
+}
 
 @media (max-width: 1040px) {
   .cp-metrics {
@@ -470,6 +501,9 @@
   .cp-user > span {
     display: none;
   }
+  .cp-locale-select {
+    width: 112px;
+  }
   .cp-content {
     padding-top: 26px;
   }
@@ -493,6 +527,9 @@
     grid-template-columns: 1fr;
   }
   .cp-release-lookup {
+    grid-template-columns: 1fr;
+  }
+  .cp-localized-fields {
     grid-template-columns: 1fr;
   }
 }

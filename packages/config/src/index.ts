@@ -10,6 +10,14 @@ const optionalString = z.preprocess(
   (value) => (value === '' ? undefined : value),
   z.string().min(1).optional(),
 );
+const optionalEmail = z.preprocess(
+  (value) => (value === '' ? undefined : value),
+  z.string().trim().toLowerCase().email().max(254).optional(),
+);
+const optionalPassword = z.preprocess(
+  (value) => (value === '' ? undefined : value),
+  z.string().min(12).max(1024).optional(),
+);
 const optionalSecret = z.preprocess(
   (value) => (value === '' ? undefined : value),
   z.string().min(32).optional(),
@@ -36,6 +44,8 @@ const environmentSchema = z
     OTP_PEPPER: z.string().min(32).default(DEVELOPMENT_OTP_PEPPER),
     AUTH_MODE: z.enum(['local_otp', 'oidc', 'hybrid']).default('local_otp'),
     AUTH_DEV_EXPOSE_OTP: booleanString,
+    AUTH_PASSWORD_ADMIN_EMAIL: optionalEmail,
+    AUTH_PASSWORD_ADMIN_PASSWORD: optionalPassword,
     EMAIL_DELIVERY: z.enum(['noop', 'smtp', 'webhook']).default('noop'),
     SMTP_HOST: optionalString,
     SMTP_PORT: z.coerce.number().int().positive().max(65_535).default(587),
@@ -48,6 +58,9 @@ const environmentSchema = z
     EMAIL_WEBHOOK_TOKEN: optionalSecret,
     BOOTSTRAP_ADMIN_EMAILS: z.string().default(''),
     WORKER_CALLBACK_TOKEN: z.string().min(32).default(DEVELOPMENT_WORKER_TOKEN),
+    AUTHORIZATION_LEASE_SIGNING_KEY_ID: optionalString,
+    AUTHORIZATION_LEASE_SIGNING_PRIVATE_KEY: optionalString,
+    AUTHORIZATION_LEASE_TTL_SECONDS: z.coerce.number().int().min(60).max(86_400).default(900),
     VALIDATION_QUEUE_MODE: z.enum(['memory', 'redis']).default('memory'),
     OBJECT_STORAGE_MODE: z.enum(['memory', 's3']).default('memory'),
     ARTIFACT_UPLOAD_BASE_URL: z.string().url().default('http://localhost:9000/awesome-workflow'),
@@ -95,6 +108,23 @@ const environmentSchema = z
         code: z.ZodIssueCode.custom,
         path: ['SMTP_USER'],
         message: 'SMTP username and password must be configured together',
+      });
+    }
+    if (Boolean(value.AUTH_PASSWORD_ADMIN_EMAIL) !== Boolean(value.AUTH_PASSWORD_ADMIN_PASSWORD)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AUTH_PASSWORD_ADMIN_EMAIL'],
+        message: 'Password administrator email and password must be configured together',
+      });
+    }
+    if (
+      Boolean(value.AUTHORIZATION_LEASE_SIGNING_KEY_ID) !==
+      Boolean(value.AUTHORIZATION_LEASE_SIGNING_PRIVATE_KEY)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AUTHORIZATION_LEASE_SIGNING_PRIVATE_KEY'],
+        message: 'Authorization lease signing key id and private key must be configured together',
       });
     }
     if (
@@ -182,6 +212,13 @@ const environmentSchema = z
           code: z.ZodIssueCode.custom,
           path: ['OBJECT_STORAGE_MODE'],
           message: 'Production requires S3-compatible object storage',
+        });
+      }
+      if (!value.AUTHORIZATION_LEASE_SIGNING_KEY_ID || !value.AUTHORIZATION_LEASE_SIGNING_PRIVATE_KEY) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['AUTHORIZATION_LEASE_SIGNING_PRIVATE_KEY'],
+          message: 'Production requires an Ed25519 authorization lease signing key',
         });
       }
       if (value.AUTH_MODE !== 'hybrid') {

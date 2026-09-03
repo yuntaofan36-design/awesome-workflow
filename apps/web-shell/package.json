@@ -16,6 +16,7 @@
   "dependencies": {
     "@arco-design/web-react": "^2.66.0",
     "@awesome-workflow/contracts": "workspace:*",
+    "@awesome-workflow/i18n": "workspace:*",
     "@awesome-workflow/manifest-schema": "workspace:*",
     "@awesome-workflow/ui": "workspace:*",
     "@awesome-workflow/web-sdk": "workspace:*",
@@ -27,6 +28,7 @@
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.55.0",
     "@tailwindcss/vite": "^4.1.0",
     "@types/node": "catalog:",
     "@types/react": "^19.0.0",

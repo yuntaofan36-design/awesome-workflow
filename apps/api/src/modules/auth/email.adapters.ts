@@ -2,12 +2,19 @@ import { Injectable, type OnModuleDestroy } from '@nestjs/common';
 import nodemailer, { type Transporter } from 'nodemailer';
 
 import type { PlatformConfig } from '@awesome-workflow/config';
+import type { SupportedLocale } from '@awesome-workflow/contracts';
 
+import { loginEmailContent } from '../../i18n/locale.js';
 import type { EmailDeliveryPort } from './auth.port.js';
 
 @Injectable()
 export class NoopEmailDelivery implements EmailDeliveryPort {
-  async sendLoginCode(_input: { email: string; code: string; expiresInMinutes: number }): Promise<void> {
+  async sendLoginCode(_input: {
+    email: string;
+    code: string;
+    expiresInMinutes: number;
+    locale: SupportedLocale;
+  }): Promise<void> {
     // Local/test runs may opt into returning the code from the challenge endpoint.
     // The code is intentionally never written to logs.
   }
@@ -43,17 +50,18 @@ export class SmtpEmailDelivery implements EmailDeliveryPort, OnModuleDestroy {
       });
   }
 
-  async sendLoginCode(input: { email: string; code: string; expiresInMinutes: number }): Promise<void> {
+  async sendLoginCode(input: {
+    email: string;
+    code: string;
+    expiresInMinutes: number;
+    locale: SupportedLocale;
+  }): Promise<void> {
+    const content = loginEmailContent(input.locale, input.code, input.expiresInMinutes);
     await this.transport.sendMail({
       from: this.config.SMTP_FROM!,
       to: input.email,
-      subject: 'Your Awesome Workflow sign-in code',
-      text: [
-        `Your sign-in code is ${input.code}.`,
-        '',
-        `It expires in ${input.expiresInMinutes} minutes.`,
-        'If you did not request this code, ignore this email.',
-      ].join('\n'),
+      subject: content.subject,
+      text: content.text,
       disableFileAccess: true,
       disableUrlAccess: true,
     });
@@ -67,7 +75,12 @@ export class SmtpEmailDelivery implements EmailDeliveryPort, OnModuleDestroy {
 export class WebhookEmailDelivery implements EmailDeliveryPort {
   constructor(private readonly config: PlatformConfig) {}
 
-  async sendLoginCode(input: { email: string; code: string; expiresInMinutes: number }): Promise<void> {
+  async sendLoginCode(input: {
+    email: string;
+    code: string;
+    expiresInMinutes: number;
+    locale: SupportedLocale;
+  }): Promise<void> {
     const response = await fetch(this.config.EMAIL_WEBHOOK_URL!, {
       method: 'POST',
       headers: {
@@ -76,6 +89,7 @@ export class WebhookEmailDelivery implements EmailDeliveryPort {
       },
       body: JSON.stringify({
         template: 'login-code',
+        locale: input.locale,
         to: input.email,
         variables: { code: input.code, expiresInMinutes: input.expiresInMinutes },
       }),

@@ -56,6 +56,45 @@ pub enum AuthError {
     Transport,
     #[error("authentication is not supported on this platform without a secure credential store")]
     UnsupportedPlatform,
+    #[error("unsupported desktop locale")]
+    UnsupportedLocale,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DesktopLocale {
+    EnUs,
+    ZhCn,
+}
+
+impl DesktopLocale {
+    pub(crate) fn parse(value: &str) -> AuthResult<Self> {
+        match value {
+            "en-US" => Ok(Self::EnUs),
+            "zh-CN" => Ok(Self::ZhCn),
+            _ => Err(AuthError::UnsupportedLocale),
+        }
+    }
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::EnUs => "en-US",
+            Self::ZhCn => "zh-CN",
+        }
+    }
+
+    fn callback_rejected(self) -> &'static str {
+        match self {
+            Self::EnUs => "Authorization response rejected.",
+            Self::ZhCn => "授权响应已被拒绝。",
+        }
+    }
+
+    fn callback_completed(self) -> &'static str {
+        match self {
+            Self::EnUs => "Awesome Workflow sign-in completed. You can close this window.",
+            Self::ZhCn => "Awesome Workflow 登录已完成，你可以关闭此窗口。",
+        }
+    }
 }
 
 /// Stores one opaque serialized credential. Implementations must use an OS-backed
@@ -72,6 +111,7 @@ pub struct HttpRequest {
     bearer: Option<String>,
     body: Option<Value>,
     form: Option<Vec<(String, String)>>,
+    accept_language: Option<String>,
 }
 
 pub struct HttpResponse {
@@ -99,7 +139,12 @@ pub trait BrowserLauncher: Send + Sync {
 
 trait AuthorizationReceiver {
     fn redirect_uri(&self) -> &Url;
-    fn receive(&self, expected_state: &str, timeout: Duration) -> AuthResult<String>;
+    fn receive(
+        &self,
+        expected_state: &str,
+        timeout: Duration,
+        locale: DesktopLocale,
+    ) -> AuthResult<String>;
 }
 
 #[derive(Clone, Serialize)]
@@ -135,6 +180,7 @@ pub struct DesktopUser {
 pub struct AuthenticatedApiInput {
     pub method: DesktopApiMethod,
     pub path: String,
+    pub locale: String,
 }
 
 #[derive(Clone, Copy, Deserialize)]
@@ -266,12 +312,13 @@ impl DesktopAuth {
         }
     }
 
-    pub fn current(&self) -> AuthResult<Option<DesktopSession>> {
+    pub fn current(&self, locale: &str) -> AuthResult<Option<DesktopSession>> {
+        let locale = DesktopLocale::parse(locale)?;
         let _guard = self
             .credential_lock
             .lock()
             .map_err(|_| AuthError::Transport)?;
-        let Some(mut credential) = self.load_ready_credential()? else {
+        let Some(mut credential) = self.load_ready_credential(locale)? else {
             return Ok(None);
         };
         let mut response = self.http.send(HttpRequest {
@@ -280,15 +327,17 @@ impl DesktopAuth {
             bearer: Some(credential.access_token.clone()),
             body: None,
             form: None,
+            accept_language: Some(locale.as_str().to_owned()),
         })?;
         if response.status == 401 {
-            credential = self.refresh_or_clear(&credential)?;
+            credential = self.refresh_or_clear(&credential, locale)?;
             response = self.http.send(HttpRequest {
                 method: HttpMethod::Get,
                 url: self.api_url("auth/session")?,
                 bearer: Some(credential.access_token.clone()),
                 body: None,
                 form: None,
+                accept_language: Some(locale.as_str().to_owned()),
             })?;
         }
         if response.status == 401 {
@@ -303,13 +352,15 @@ impl DesktopAuth {
         }))
     }
 
-    pub fn providers(&self) -> AuthResult<Vec<AuthProviderDescriptor>> {
+    pub fn providers(&self, locale: &str) -> AuthResult<Vec<AuthProviderDescriptor>> {
+        let locale = DesktopLocale::parse(locale)?;
         let response = self.http.send(HttpRequest {
             method: HttpMethod::Get,
             url: self.api_url("auth/providers")?,
             bearer: None,
             body: None,
             form: None,
+            accept_language: Some(locale.as_str().to_owned()),
         })?;
         let providers: Vec<AuthProviderDescriptor> = decode_success(response)?;
         for provider in &providers {
@@ -318,19 +369,21 @@ impl DesktopAuth {
         Ok(providers)
     }
 
-    pub fn login(&self) -> AuthResult<DesktopSession> {
+    pub fn login(&self, locale: &str) -> AuthResult<DesktopSession> {
+        let locale = DesktopLocale::parse(locale)?;
         let _guard = self
             .credential_lock
             .lock()
             .map_err(|_| AuthError::Transport)?;
         let receiver = LoopbackReceiver::bind()?;
-        self.login_with_receiver(&receiver, LoginMaterial::generate()?)
+        self.login_with_receiver(&receiver, LoginMaterial::generate()?, locale)
     }
 
     fn login_with_receiver(
         &self,
         receiver: &dyn AuthorizationReceiver,
         material: LoginMaterial,
+        locale: DesktopLocale,
     ) -> AuthResult<DesktopSession> {
         let redirect_uri = receiver.redirect_uri().as_str();
         let authorization: AuthorizationResult = self.post_public(
@@ -342,10 +395,11 @@ impl DesktopAuth {
                 scope: DESKTOP_OFFLINE_SCOPE,
                 state: &material.state,
             },
+            locale,
         )?;
         let authorization_url = validate_authorization_url(&authorization.authorization_url)?;
         self.browser.open(&authorization_url)?;
-        let code = receiver.receive(&material.state, LOGIN_TIMEOUT)?;
+        let code = receiver.receive(&material.state, LOGIN_TIMEOUT, locale)?;
         validate_pkce_value(&code)?;
 
         let token: TokenResult = self.post_public(
@@ -355,6 +409,7 @@ impl DesktopAuth {
                 code_verifier: &material.verifier,
                 redirect_uri,
             },
+            locale,
         )?;
         validate_token_result(&token)?;
         let credential = StoredCredential {
@@ -371,7 +426,8 @@ impl DesktopAuth {
         })
     }
 
-    pub fn logout(&self) -> AuthResult<()> {
+    pub fn logout(&self, locale: &str) -> AuthResult<()> {
+        let locale = DesktopLocale::parse(locale)?;
         let _guard = self
             .credential_lock
             .lock()
@@ -393,6 +449,7 @@ impl DesktopAuth {
             bearer: Some(credential.access_token),
             body: None,
             form: None,
+            accept_language: Some(locale.as_str().to_owned()),
         });
         Ok(())
     }
@@ -401,12 +458,13 @@ impl DesktopAuth {
         &self,
         input: AuthenticatedApiInput,
     ) -> AuthResult<AuthenticatedApiResponse> {
+        let locale = DesktopLocale::parse(&input.locale)?;
         validate_broker_endpoint(input.method, &input.path)?;
         let _guard = self
             .credential_lock
             .lock()
             .map_err(|_| AuthError::Transport)?;
-        let Some(mut credential) = self.load_ready_credential()? else {
+        let Some(mut credential) = self.load_ready_credential(locale)? else {
             return Err(AuthError::InvalidCredential);
         };
         let path = input.path.trim_start_matches('/');
@@ -417,15 +475,17 @@ impl DesktopAuth {
             bearer: Some(credential.access_token.clone()),
             body: None,
             form: None,
+            accept_language: Some(locale.as_str().to_owned()),
         })?;
         if response.status == 401 {
-            credential = self.refresh_or_clear(&credential)?;
+            credential = self.refresh_or_clear(&credential, locale)?;
             response = self.http.send(HttpRequest {
                 method: HttpMethod::Get,
                 url,
                 bearer: Some(credential.access_token),
                 body: None,
                 form: None,
+                accept_language: Some(locale.as_str().to_owned()),
             })?;
         }
         if response.status == 401 {
@@ -441,7 +501,8 @@ impl DesktopAuth {
         Ok(AuthenticatedApiResponse { status, body })
     }
 
-    pub fn register_device(&self, body: Value) -> AuthResult<DeviceEnrollmentSecret> {
+    pub fn register_device(&self, body: Value, locale: &str) -> AuthResult<DeviceEnrollmentSecret> {
+        let locale = DesktopLocale::parse(locale)?;
         if !body.is_object()
             || serde_json::to_vec(&body)
                 .map_err(|_| AuthError::InvalidResponse)?
@@ -454,7 +515,7 @@ impl DesktopAuth {
             .credential_lock
             .lock()
             .map_err(|_| AuthError::Transport)?;
-        let Some(mut credential) = self.load_ready_credential()? else {
+        let Some(mut credential) = self.load_ready_credential(locale)? else {
             return Err(AuthError::InvalidCredential);
         };
         let url = self.api_url("devices")?;
@@ -464,15 +525,17 @@ impl DesktopAuth {
             bearer: Some(credential.access_token.clone()),
             body: Some(body.clone()),
             form: None,
+            accept_language: Some(locale.as_str().to_owned()),
         })?;
         if response.status == 401 {
-            credential = self.refresh_or_clear(&credential)?;
+            credential = self.refresh_or_clear(&credential, locale)?;
             response = self.http.send(HttpRequest {
                 method: HttpMethod::Post,
                 url,
                 bearer: Some(credential.access_token),
                 body: Some(body),
                 form: None,
+                accept_language: Some(locale.as_str().to_owned()),
             })?;
         }
         if response.status == 401 {
@@ -499,7 +562,11 @@ impl DesktopAuth {
         self.api_base.to_string()
     }
 
-    fn refresh_credential(&self, credential: &StoredCredential) -> AuthResult<StoredCredential> {
+    fn refresh_credential(
+        &self,
+        credential: &StoredCredential,
+        locale: DesktopLocale,
+    ) -> AuthResult<StoredCredential> {
         let response = self.http.send(HttpRequest {
             method: HttpMethod::Post,
             url: self.api_url("auth/cli/token")?,
@@ -510,6 +577,7 @@ impl DesktopAuth {
                 ("refresh_token".into(), credential.refresh_token.clone()),
                 ("client_id".into(), DESKTOP_PUBLIC_CLIENT_ID.into()),
             ]),
+            accept_language: Some(locale.as_str().to_owned()),
         })?;
         let token: RefreshTokenResult = decode_oauth_success(response)?;
         validate_refresh_token_result(&token)?;
@@ -529,8 +597,12 @@ impl DesktopAuth {
         Ok(next)
     }
 
-    fn refresh_or_clear(&self, credential: &StoredCredential) -> AuthResult<StoredCredential> {
-        match self.refresh_credential(credential) {
+    fn refresh_or_clear(
+        &self,
+        credential: &StoredCredential,
+        locale: DesktopLocale,
+    ) -> AuthResult<StoredCredential> {
+        match self.refresh_credential(credential, locale) {
             Ok(next) => Ok(next),
             Err(error) => {
                 self.credentials.delete()?;
@@ -539,24 +611,30 @@ impl DesktopAuth {
         }
     }
 
-    fn load_ready_credential(&self) -> AuthResult<Option<StoredCredential>> {
+    fn load_ready_credential(&self, locale: DesktopLocale) -> AuthResult<Option<StoredCredential>> {
         let Some(credential) = self.load_stored_credential()? else {
             return Ok(None);
         };
         let remaining = parse_timestamp(&credential.expires_at)? - unix_timestamp()?;
         if remaining <= MIN_SESSION_REMAINING_SECONDS {
-            return self.refresh_or_clear(&credential).map(Some);
+            return self.refresh_or_clear(&credential, locale).map(Some);
         }
         Ok(Some(credential))
     }
 
-    fn post_public<T: DeserializeOwned>(&self, path: &str, body: &impl Serialize) -> AuthResult<T> {
+    fn post_public<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &impl Serialize,
+        locale: DesktopLocale,
+    ) -> AuthResult<T> {
         let response = self.http.send(HttpRequest {
             method: HttpMethod::Post,
             url: self.api_url(path)?,
             bearer: None,
             body: Some(serde_json::to_value(body).map_err(|_| AuthError::InvalidResponse)?),
             form: None,
+            accept_language: Some(locale.as_str().to_owned()),
         })?;
         decode_success(response)
     }
@@ -685,9 +763,12 @@ fn validate_user(user: &DesktopUser) -> AuthResult<()> {
 fn validate_provider(provider: &AuthProviderDescriptor) -> AuthResult<()> {
     if !matches!(
         provider.id.as_str(),
-        "email" | "google" | "feishu" | "wechat"
+        "email" | "password" | "google" | "feishu" | "wechat"
     ) || provider.label.is_empty()
-        || !matches!(provider.protocol.as_str(), "email_otp" | "oidc")
+        || !matches!(
+            provider.protocol.as_str(),
+            "email_otp" | "password" | "oidc"
+        )
         || !matches!(
             provider.status.as_str(),
             "active" | "configured" | "disabled"
@@ -845,6 +926,9 @@ impl HttpTransport for ReqwestTransport {
             .client
             .request(method, request.url)
             .header("accept", "application/json");
+        if let Some(locale) = request.accept_language {
+            builder = builder.header("accept-language", locale);
+        }
         if let Some(token) = request.bearer {
             builder = builder.bearer_auth(token);
         }
@@ -941,11 +1025,16 @@ impl AuthorizationReceiver for LoopbackReceiver {
         &self.redirect_uri
     }
 
-    fn receive(&self, expected_state: &str, timeout: Duration) -> AuthResult<String> {
+    fn receive(
+        &self,
+        expected_state: &str,
+        timeout: Duration,
+        locale: DesktopLocale,
+    ) -> AuthResult<String> {
         let deadline = Instant::now() + timeout;
         loop {
             match self.listener.accept() {
-                Ok((mut stream, _)) => return read_callback(&mut stream, expected_state),
+                Ok((mut stream, _)) => return read_callback(&mut stream, expected_state, locale),
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     if Instant::now() >= deadline {
                         return Err(AuthError::CallbackTimeout);
@@ -958,7 +1047,11 @@ impl AuthorizationReceiver for LoopbackReceiver {
     }
 }
 
-fn read_callback(stream: &mut TcpStream, expected_state: &str) -> AuthResult<String> {
+fn read_callback(
+    stream: &mut TcpStream,
+    expected_state: &str,
+    locale: DesktopLocale,
+) -> AuthResult<String> {
     stream
         .set_read_timeout(Some(Duration::from_secs(2)))
         .map_err(|_| AuthError::Transport)?;
@@ -977,7 +1070,7 @@ fn read_callback(stream: &mut TcpStream, expected_state: &str) -> AuthResult<Str
         }
     }
     if request.len() > MAX_CALLBACK_HEADER_BYTES {
-        write_callback_response(stream, 400, "Authorization response rejected.");
+        write_callback_response(stream, 400, locale.callback_rejected());
         return Err(AuthError::InvalidCallback);
     }
     let request = std::str::from_utf8(&request).map_err(|_| AuthError::InvalidCallback)?;
@@ -987,7 +1080,7 @@ fn read_callback(stream: &mut TcpStream, expected_state: &str) -> AuthResult<Str
     let target = parts.next();
     let version = parts.next();
     if method != Some("GET") || version != Some("HTTP/1.1") || parts.next().is_some() {
-        write_callback_response(stream, 400, "Authorization response rejected.");
+        write_callback_response(stream, 400, locale.callback_rejected());
         return Err(AuthError::InvalidCallback);
     }
     let target = target.ok_or(AuthError::InvalidCallback)?;
@@ -1005,14 +1098,10 @@ fn read_callback(stream: &mut TcpStream, expected_state: &str) -> AuthResult<Str
         || !constant_time_eq(expected_state, &state)
         || validate_pkce_value(&code).is_err()
     {
-        write_callback_response(stream, 400, "Authorization response rejected.");
+        write_callback_response(stream, 400, locale.callback_rejected());
         return Err(AuthError::InvalidCallback);
     }
-    write_callback_response(
-        stream,
-        200,
-        "Awesome Workflow sign-in completed. You can close this window.",
-    );
+    write_callback_response(stream, 200, locale.callback_completed());
     Ok(code)
 }
 
@@ -1162,7 +1251,12 @@ mod tests {
             &self.redirect_uri
         }
 
-        fn receive(&self, expected_state: &str, _timeout: Duration) -> AuthResult<String> {
+        fn receive(
+            &self,
+            expected_state: &str,
+            _timeout: Duration,
+            _locale: DesktopLocale,
+        ) -> AuthResult<String> {
             if !constant_time_eq(expected_state, &self.callback_state) {
                 return Err(AuthError::InvalidCallback);
             }
@@ -1226,6 +1320,19 @@ mod tests {
     }
 
     #[test]
+    fn desktop_locale_is_allowlisted_and_callback_copy_is_frozen() {
+        assert_eq!(DesktopLocale::parse("zh-CN").unwrap(), DesktopLocale::ZhCn);
+        assert_eq!(
+            DesktopLocale::ZhCn.callback_completed(),
+            "Awesome Workflow 登录已完成，你可以关闭此窗口。"
+        );
+        assert!(matches!(
+            DesktopLocale::parse("fr-FR"),
+            Err(AuthError::UnsupportedLocale)
+        ));
+    }
+
+    #[test]
     fn concrete_loopback_receiver_accepts_only_the_expected_callback_shape() {
         let receiver = LoopbackReceiver::bind().unwrap();
         let address = receiver.listener.local_addr().unwrap();
@@ -1246,7 +1353,9 @@ mod tests {
             assert!(response.starts_with("HTTP/1.1 200 OK"));
         });
         assert_eq!(
-            receiver.receive(&state, Duration::from_secs(2)).unwrap(),
+            receiver
+                .receive(&state, Duration::from_secs(2), DesktopLocale::EnUs)
+                .unwrap(),
             code
         );
         sender.join().unwrap();
@@ -1289,7 +1398,9 @@ mod tests {
             callback_state: material.state.clone(),
         };
 
-        let session = auth.login_with_receiver(&receiver, material).unwrap();
+        let session = auth
+            .login_with_receiver(&receiver, material, DesktopLocale::ZhCn)
+            .unwrap();
         let public = serde_json::to_string(&session).unwrap();
         assert!(!public.contains("secret-session-token"));
         assert!(!public.contains("secret-refresh-token"));
@@ -1315,11 +1426,58 @@ mod tests {
         let requests = http.requests.lock().unwrap();
         assert!(requests[0].bearer.is_none());
         assert!(requests[1].bearer.is_none());
+        assert_eq!(requests[0].accept_language.as_deref(), Some("zh-CN"));
+        assert_eq!(requests[1].accept_language.as_deref(), Some("zh-CN"));
         let authorize = requests[0].body.as_ref().unwrap();
         assert_eq!(authorize["codeChallengeMethod"], "S256");
         assert_eq!(authorize["scope"], DESKTOP_OFFLINE_SCOPE);
         let token = requests[1].body.as_ref().unwrap();
         assert_eq!(token["codeVerifier"], "v".repeat(64));
+    }
+
+    #[test]
+    fn session_provider_and_logout_requests_forward_the_selected_locale() {
+        let store = Arc::new(MemoryStore::default());
+        store
+            .save(
+                &serde_json::to_string(&stored_credential(
+                    &"a".repeat(64),
+                    &"r".repeat(64),
+                    future_expiry(),
+                ))
+                .unwrap(),
+            )
+            .unwrap();
+        let http = Arc::new(MockHttp::new(vec![
+            response(200, serde_json::json!({"data": user_json()})),
+            response(
+                200,
+                serde_json::json!({"data": [{
+                    "id": "email",
+                    "label": "Email",
+                    "protocol": "email_otp",
+                    "status": "active",
+                    "strategy": "local_email_otp"
+                }]}),
+            ),
+            response(204, Value::Null),
+        ]));
+        let auth = DesktopAuth::new(
+            Url::parse("https://api.example.test/api/v1").unwrap(),
+            store,
+            http.clone(),
+            Arc::new(MockBrowser::default()),
+        );
+
+        assert!(auth.current("zh-CN").unwrap().is_some());
+        assert_eq!(auth.providers("zh-CN").unwrap().len(), 1);
+        auth.logout("zh-CN").unwrap();
+
+        let requests = http.requests.lock().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert!(requests
+            .iter()
+            .all(|request| request.accept_language.as_deref() == Some("zh-CN")));
     }
 
     #[test]
@@ -1347,6 +1505,7 @@ mod tests {
                 challenge: "x".repeat(43),
                 state: "s".repeat(48),
             },
+            DesktopLocale::EnUs,
         );
         assert!(matches!(result, Err(AuthError::InvalidCallback)));
         assert!(store.0.lock().unwrap().is_none());
@@ -1383,6 +1542,7 @@ mod tests {
         auth.authenticated_request(AuthenticatedApiInput {
             method: DesktopApiMethod::Get,
             path: "/workspaces".into(),
+            locale: "zh-CN".into(),
         })
         .unwrap();
         let requests = http.requests.lock().unwrap();
@@ -1391,11 +1551,13 @@ mod tests {
             requests[0].bearer.as_deref(),
             Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         );
+        assert_eq!(requests[0].accept_language.as_deref(), Some("zh-CN"));
         drop(requests);
         assert!(matches!(
             auth.authenticated_request(AuthenticatedApiInput {
                 method: DesktopApiMethod::Get,
                 path: "https://attacker.example/collect".into(),
+                locale: "zh-CN".into(),
             }),
             Err(AuthError::EndpointNotAllowed)
         ));
@@ -1433,7 +1595,7 @@ mod tests {
             Arc::new(MockBrowser::default()),
         );
 
-        let session = auth.current().unwrap().unwrap();
+        let session = auth.current("zh-CN").unwrap().unwrap();
         let public = serde_json::to_string(&session).unwrap();
         assert!(!public.contains(&"b".repeat(32)));
         assert!(!public.contains(&"s".repeat(43)));
@@ -1452,6 +1614,9 @@ mod tests {
         assert!(form.contains(&("refresh_token".into(), "r".repeat(64))));
         assert!(form.contains(&("client_id".into(), DESKTOP_PUBLIC_CLIENT_ID.into())));
         assert_eq!(requests[1].bearer.as_deref(), Some("b".repeat(64).as_str()));
+        assert!(requests
+            .iter()
+            .all(|request| request.accept_language.as_deref() == Some("zh-CN")));
     }
 
     #[test]
@@ -1491,6 +1656,7 @@ mod tests {
             .authenticated_request(AuthenticatedApiInput {
                 method: DesktopApiMethod::Get,
                 path: "/workspaces".into(),
+                locale: "zh-CN".into(),
             })
             .unwrap();
         assert_eq!(result.status, 200);
@@ -1499,6 +1665,9 @@ mod tests {
         assert_eq!(requests[0].bearer.as_deref(), Some("a".repeat(64).as_str()));
         assert!(requests[1].form.is_some());
         assert_eq!(requests[2].bearer.as_deref(), Some("b".repeat(64).as_str()));
+        assert!(requests
+            .iter()
+            .all(|request| request.accept_language.as_deref() == Some("zh-CN")));
     }
 
     #[test]
@@ -1525,7 +1694,10 @@ mod tests {
             Arc::new(MockBrowser::default()),
         );
 
-        assert!(matches!(auth.current(), Err(AuthError::Rejected(400))));
+        assert!(matches!(
+            auth.current("zh-CN"),
+            Err(AuthError::Rejected(400))
+        ));
         assert!(store.0.lock().unwrap().is_none());
     }
 
@@ -1566,7 +1738,7 @@ mod tests {
             "publicKeyThumbprint": "a".repeat(64)
         });
 
-        let secret = auth.register_device(body.clone()).unwrap();
+        let secret = auth.register_device(body.clone(), "zh-CN").unwrap();
         assert_eq!(secret.device_id, device_id);
         assert_eq!(secret.credential, device_credential);
         assert_eq!(auth.api_base_url(), "https://api.example.test/api/v1");
@@ -1574,11 +1746,13 @@ mod tests {
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].method, HttpMethod::Post);
         assert_eq!(requests[0].body.as_ref(), Some(&body));
+        assert_eq!(requests[0].accept_language.as_deref(), Some("zh-CN"));
         drop(requests);
         assert!(matches!(
             auth.authenticated_request(AuthenticatedApiInput {
                 method: DesktopApiMethod::Get,
                 path: "/devices".into(),
+                locale: "zh-CN".into(),
             }),
             Err(AuthError::EndpointNotAllowed)
         ));

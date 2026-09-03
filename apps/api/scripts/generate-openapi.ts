@@ -42,6 +42,7 @@ import {
   ListSchedulesQuerySchema,
   OidcAuthorizationInputSchema,
   OidcAuthorizationResultSchema,
+  PasswordLoginInputSchema,
   PauseScheduleInputSchema,
   PermissionGrantListResultSchema,
   PermissionGrantPreviewSchema,
@@ -231,6 +232,16 @@ register(
   'listAuthProviders',
   undefined,
   success(z.array(schemas.AuthProvider)),
+  [],
+);
+register(
+  'post',
+  '/api/v1/auth/password/login',
+  'loginWithPassword',
+  {
+    body: jsonBody(PasswordLoginInputSchema),
+  },
+  success(schemas.CurrentUser),
   [],
 );
 register(

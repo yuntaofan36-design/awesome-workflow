@@ -39,6 +39,7 @@ test('hybrid auth exposes local email OTP while requiring an enabled provider fo
     providers.map(({ id, protocol, status, strategy }) => ({ id, protocol, status, strategy })),
     [
       { id: 'email', protocol: 'email_otp', status: 'active', strategy: 'local_email_otp' },
+      { id: 'password', protocol: 'password', status: 'disabled', strategy: 'local_password' },
       { id: 'google', protocol: 'oidc', status: 'active', strategy: 'oidc_broker' },
       { id: 'feishu', protocol: 'oidc', status: 'disabled', strategy: 'oidc_broker' },
       { id: 'wechat', protocol: 'oidc', status: 'disabled', strategy: 'oidc_broker' },

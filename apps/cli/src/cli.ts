@@ -12,6 +12,8 @@ import { loadCredential } from './credentials.js';
 import { promoteRelease, publishPackagedRelease, releaseStatus } from './control-plane.js';
 import { initializeManifest, packageRelease, readArtifactInputMap } from './package-release.js';
 import { CliError, SecretRedactor, type TextWriter, requireEnvironmentSecret, writeLine } from './safety.js';
+import { cliText, extractLocaleArgument, resolveCliLocale, runWithCliLocale } from './i18n.js';
+import { normalizeLocale } from '@awesome-workflow/i18n';
 
 export type CliRuntime = {
   cwd: string;
@@ -33,12 +35,25 @@ export async function runCli(argv: readonly string[], overrides: Partial<CliRunt
     fetchImpl: overrides.fetchImpl ?? globalThis.fetch,
     ...(overrides.openBrowser ? { openBrowser: overrides.openBrowser } : {}),
   };
+  const localizedArguments = extractLocaleArgument(argv);
+  const locale = resolveCliLocale(localizedArguments.requestedLocale, runtime.environment);
+  return runWithCliLocale(locale, () => runLocalizedCli(localizedArguments, runtime));
+}
+
+async function runLocalizedCli(
+  localizedArguments: ReturnType<typeof extractLocaleArgument>,
+  runtime: CliRuntime,
+): Promise<number> {
   const redactor = new SecretRedactor();
   try {
-    const command = argv[0];
-    const args = argv.slice(1);
+    if (localizedArguments.error) throw new CliError(cliText(`locale.${localizedArguments.error}`), 2);
+    if (localizedArguments.requestedLocale && !normalizeLocale(localizedArguments.requestedLocale)) {
+      throw new CliError(cliText('locale.unsupported', { locale: localizedArguments.requestedLocale }), 2);
+    }
+    const command = localizedArguments.argv[0];
+    const args = localizedArguments.argv.slice(1);
     if (!command || command === 'help' || command === '--help' || command === '-h') {
-      writeLine(runtime.stdout, HELP_TEXT);
+      writeLine(runtime.stdout, cliText('help'));
       return 0;
     }
     switch (command) {
@@ -63,7 +78,7 @@ export async function runCli(argv: readonly string[], overrides: Partial<CliRunt
         await statusCommand(args, runtime, redactor);
         return 0;
       default:
-        throw new CliError(`Unknown command: ${command}. Run \`aw help\` for usage.`, 2);
+        throw new CliError(cliText('command.unknown', { command }), 2);
     }
   } catch (error) {
     const exitCode = error instanceof CliError ? error.exitCode : 1;
@@ -104,7 +119,10 @@ async function loginCommand(
         openBrowser: runtime.openBrowser,
         redactor,
       });
-  writeLine(runtime.stdout, `Authenticated as ${session.user.email}; session expires ${session.expiresAt}.`);
+  writeLine(
+    runtime.stdout,
+    cliText('success.authenticated', { email: session.user.email, expiresAt: session.expiresAt }),
+  );
 }
 
 async function initCommand(args: readonly string[], runtime: CliRuntime): Promise<void> {
@@ -115,27 +133,23 @@ async function initCommand(args: readonly string[], runtime: CliRuntime): Promis
     output: { type: 'string' },
   });
   const kind = requiredStringOption(values, 'kind');
-  if (kind !== 'web' && kind !== 'desktop') throw new CliError('--kind must be web or desktop.', 2);
+  if (kind !== 'web' && kind !== 'desktop') throw new CliError(cliText('error.kind'), 2);
   const appId = requiredStringOption(values, 'app-id');
   const outputPath = resolve(runtime.cwd, stringOption(values, 'output') ?? 'awesome-workflow.manifest.json');
   const manifest = await initializeManifest({ kind, appId, name: stringOption(values, 'name'), outputPath });
-  writeLine(
-    runtime.stdout,
-    `Created ${manifest.kind} manifest ${outputPath}. Signing remains unconfigured until \`aw package\`.`,
-  );
+  writeLine(runtime.stdout, cliText('success.manifestCreated', { kind: manifest.kind, path: outputPath }));
 }
 
 async function devCommand(args: readonly string[], runtime: CliRuntime): Promise<number> {
   const delimiter = args.indexOf('--');
-  if (delimiter < 0)
-    throw new CliError('`aw dev` requires a command after `--`, for example: aw dev -- pnpm dev.', 2);
+  if (delimiter < 0) throw new CliError(cliText('error.devDelimiter'), 2);
   const values = parseCommandArgs(args.slice(0, delimiter), {
     manifest: { type: 'string' },
     cwd: { type: 'string' },
   });
   const childArgs = args.slice(delimiter + 1);
   const executable = childArgs[0];
-  if (!executable) throw new CliError('`aw dev` command cannot be empty.', 2);
+  if (!executable) throw new CliError(cliText('error.devEmpty'), 2);
   const workingDirectory = resolve(runtime.cwd, stringOption(values, 'cwd') ?? '.');
   const manifestPath = resolve(
     workingDirectory,
@@ -164,7 +178,7 @@ async function packageCommand(
   const inputOption = stringOption(values, 'input');
   const artifactName = stringOption(values, 'artifact-name');
   if (artifactMapPath && (inputOption || artifactName)) {
-    throw new CliError('--artifact-map cannot be combined with --input or --artifact-name.', 2);
+    throw new CliError(cliText('error.artifactMapConflict'), 2);
   }
   const result = await packageRelease({
     manifestPath: resolve(runtime.cwd, stringOption(values, 'manifest') ?? 'awesome-workflow.manifest.json'),
@@ -180,14 +194,22 @@ async function packageCommand(
     redactor,
   });
   const artifactSummary = result.artifacts
-    .map(
-      (artifact) =>
-        `${artifact.name}=${artifact.fileName} (${artifact.size} bytes, sha256 ${artifact.sha256})`,
+    .map((artifact) =>
+      cliText('success.artifactSummary', {
+        name: artifact.name,
+        fileName: artifact.fileName,
+        size: artifact.size,
+        sha256: artifact.sha256,
+      }),
     )
     .join('; ');
   writeLine(
     runtime.stdout,
-    `Packaged ${result.artifacts.length} artifact(s): ${artifactSummary}. Metadata: ${result.metadataPath}`,
+    cliText('success.packaged', {
+      count: result.artifacts.length,
+      summary: artifactSummary,
+      path: result.metadataPath,
+    }),
   );
 }
 
@@ -230,11 +252,9 @@ async function promoteCommand(
   );
   const expectedId = stringOption(values, 'expected-current-release-id');
   const expectedNone = booleanOption(values, 'expected-none');
-  if (expectedId && expectedNone)
-    throw new CliError('Use only one of --expected-current-release-id and --expected-none.', 2);
+  if (expectedId && expectedNone) throw new CliError(cliText('error.expectedConflict'), 2);
   const channel = requiredStringOption(values, 'channel');
-  if (!['dev', 'canary', 'stable'].includes(channel))
-    throw new CliError('--channel must be dev, canary, or stable.', 2);
+  if (!['dev', 'canary', 'stable'].includes(channel)) throw new CliError(cliText('error.channel'), 2);
   const api = await authenticatedApi(values, runtime, redactor);
   const summary = await promoteRelease({
     api,
@@ -303,8 +323,12 @@ function parseCommandArgs(
   args: readonly string[],
   options: Record<string, { type: 'string' | 'boolean' }>,
 ): Record<string, string | boolean | undefined> {
-  const parsed = parseArgs({ args: [...args], options, allowPositionals: false, strict: true });
-  return parsed.values;
+  try {
+    const parsed = parseArgs({ args: [...args], options, allowPositionals: false, strict: true });
+    return parsed.values;
+  } catch {
+    throw new CliError(cliText('error.arguments'), 2);
+  }
 }
 
 function stringOption(
@@ -321,7 +345,7 @@ function booleanOption(values: Record<string, string | boolean | undefined>, nam
 
 function requiredStringOption(values: Record<string, string | boolean | undefined>, name: string): string {
   const value = stringOption(values, name);
-  if (!value) throw new CliError(`Missing required option --${name}.`, 2);
+  if (!value) throw new CliError(cliText('error.requiredOption', { name }), 2);
   return value;
 }
 
@@ -331,7 +355,7 @@ function requiredUuidOption(values: Record<string, string | boolean | undefined>
 
 function assertUuid(value: string, label: string): string {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
-    throw new CliError(`${label} must be a UUID.`, 2);
+    throw new CliError(cliText('error.uuid', { label }), 2);
   }
   return value;
 }
@@ -344,7 +368,7 @@ function parsePositiveSeconds(value: string | undefined): number {
   if (!value) return 120;
   const seconds = Number(value);
   if (!Number.isInteger(seconds) || seconds < 5 || seconds > 600) {
-    throw new CliError('--timeout-seconds must be an integer from 5 to 600.', 2);
+    throw new CliError(cliText('error.timeout'), 2);
   }
   return seconds;
 }
@@ -354,13 +378,18 @@ async function validateManifest(path: string): Promise<void> {
   try {
     value = JSON.parse(await readFile(path, 'utf8')) as unknown;
   } catch {
-    throw new CliError(`Manifest is missing or is not valid JSON: ${path}`);
+    throw new CliError(cliText('error.manifestMissing', { path }));
   }
   const parsed = ReleaseManifestSchema.safeParse(value);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     throw new CliError(
-      `Manifest validation failed${issue ? ` at ${issue.path.join('.') || '<root>'}: ${issue.message}` : '.'}`,
+      issue
+        ? cliText('error.manifestValidationAt', {
+            path: issue.path.join('.') || '/',
+            code: issue.code,
+          })
+        : cliText('error.manifestValidation'),
     );
   }
 }
@@ -383,29 +412,10 @@ async function spawnCommand(
       stdio: 'inherit',
       windowsHide: false,
     });
-    child.once('error', () => reject(new CliError(`Unable to start development command: ${executable}`)));
+    child.once('error', () => reject(new CliError(cliText('error.spawn', { command: executable }))));
     child.once('exit', (code, signal) => {
-      if (signal) reject(new CliError(`Development command terminated by signal ${signal}.`));
+      if (signal) reject(new CliError(cliText('error.signal', { signal })));
       else resolvePromise(code ?? 1);
     });
   });
 }
-
-const HELP_TEXT = `Awesome Workflow CLI
-
-Usage:
-  aw login [--api URL] [--ci-oidc-env NAME]
-  aw init --kind web|desktop --app-id SLUG [--name NAME] [--output FILE]
-  aw dev [--manifest FILE] [--cwd DIR] -- COMMAND [ARG ...]
-  aw package --key-id ID (--private-key FILE | --private-key-env NAME)
-             [--manifest FILE] [--input DIR | --artifact-map FILE] [--output DIR]
-  aw publish --application-id UUID [--package FILE] [--api URL] [--token-env NAME]
-  aw promote --application-id UUID --release-id UUID --channel dev|canary|stable
-             (--expected-current-release-id UUID | --expected-none | --workspace-id UUID)
-  aw status --release-id UUID [--api URL] [--token-env NAME]
-
-Security defaults:
-  - login uses a 127.0.0.1 ephemeral callback, PKCE S256, and strict state validation;
-  - private keys and tokens are never printed;
-  - dev commands execute as an argv vector without a shell;
-  - package emits a deterministic ZIP, CycloneDX and SPDX SBOMs, and Ed25519 signatures.`;

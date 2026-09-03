@@ -1,5 +1,6 @@
 mod agent;
 mod artifact;
+mod authorization;
 mod control_plane;
 mod db;
 mod ipc;
@@ -10,11 +11,18 @@ mod scheduler;
 mod web_ui;
 
 pub use agent::{
-    Agent, AgentConfig, AgentSnapshot, DeviceEnrollmentPreparation, DeviceRegistrationStatus,
-    InstallRequest, InstalledApplet, RunOutcome, RunnerRequest, TaskRecord,
+    Agent, AgentConfig, AgentLocaleSettings, AgentSnapshot, DeviceEnrollmentPreparation,
+    DeviceRegistrationStatus, InstallRequest, InstalledApplet, RunOutcome, RunnerRequest,
+    TaskRecord,
 };
 pub use artifact::{
     ArtifactAttestation, Ed25519Verifier, RejectUnsignedVerifier, SignatureVerifier,
+};
+pub use authorization::{
+    desktop_capability_hash, AuthorizationLease, AuthorizationLeaseClaims,
+    AuthorizationLeaseSignature, AuthorizationLeaseTask, AuthorizationLeaseVerifier,
+    AuthorizationTaskKind, Ed25519AuthorizationLeaseVerifier, RejectAuthorizationLeases,
+    MAX_AUTHORIZATION_LEASE_TTL_MS,
 };
 pub use control_plane::{
     clear_device_registration, load_control_plane_config, persist_device_registration,
@@ -27,7 +35,8 @@ pub use control_plane::{
     ScheduleSyncOutcome, ScheduleSyncResponse,
 };
 pub use ipc::{
-    run_agent_daemon, AgentClient, AgentEndpoint, ManagementCommand, AGENT_PROTOCOL_VERSION,
+    authorize_runner_request, run_agent_daemon, AgentClient, AgentEndpoint, ManagementCommand,
+    AGENT_PROTOCOL_VERSION,
 };
 pub use lease::{IssuedLease, LeaseAuthority};
 pub use manifest::{

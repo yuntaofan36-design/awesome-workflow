@@ -37,11 +37,9 @@ import type {
   RequestInstallationInput,
   Run,
   RunCancellation,
-  RunClaim,
   Schedule,
-  ScheduleRecord,
+  ScheduleRecordIntent,
   ScheduleSyncQuery,
-  ScheduleSyncResult,
   UpdateScheduleInput,
   Workspace,
   WorkspaceRole,
@@ -58,12 +56,14 @@ import type {
   InstallationSyncIndex,
   OidcTransactionRecord,
   ApprovePermissionGrantRecordInput,
+  AuthorizedRunClaimRecord,
   PermissionGrantRequirementInput,
   PlatformRepository,
   RefreshSessionInput,
   ReleaseInput,
   RotateRefreshSessionInput,
   RotateRefreshSessionResult,
+  ScheduleSyncIntentResult,
 } from '../core/repository.js';
 
 type WorkspaceRecord = Omit<Workspace, 'role'> & { createdBy: string };
@@ -82,7 +82,7 @@ type ScheduleChangeRecord = {
   scheduleId: string;
   targetDeviceId: string | null;
   operation: 'upsert' | 'remove';
-  record?: ScheduleRecord;
+  record?: ScheduleRecordIntent;
 };
 
 @Injectable()
@@ -277,7 +277,7 @@ export class MemoryPlatformRepository implements PlatformRepository {
         this.workspaces.push({
           id: workspaceId,
           slug: `${slugBase.slice(0, 48)}-${workspaceId.slice(0, 8)}`,
-          name: `${input.displayName}'s workspace`,
+          name: input.displayName,
           createdBy: user.id,
           createdAt: new Date().toISOString(),
         });
@@ -968,7 +968,7 @@ export class MemoryPlatformRepository implements PlatformRepository {
     });
   }
 
-  async syncSchedules(deviceId: string, input: ScheduleSyncQuery): Promise<ScheduleSyncResult> {
+  async syncSchedules(deviceId: string, input: ScheduleSyncQuery): Promise<ScheduleSyncIntentResult> {
     return this.write(async () => {
       const device = this.activeDevice(deviceId);
       const now = new Date();
@@ -1022,7 +1022,7 @@ export class MemoryPlatformRepository implements PlatformRepository {
       }
       if (input.revision > currentRevision)
         conflict('schedule_revision_ahead', 'The supplied schedule revision is ahead of the server');
-      const upserts = new Map<string, ScheduleRecord>();
+      const upserts = new Map<string, ScheduleRecordIntent>();
       const removed = new Set<string>();
       for (const change of this.scheduleChanges.filter(
         (candidate) =>
@@ -1142,7 +1142,7 @@ export class MemoryPlatformRepository implements PlatformRepository {
     });
   }
 
-  async claimRuns(deviceId: string, input: ClaimRunsInput): Promise<RunClaim[]> {
+  async claimRuns(deviceId: string, input: ClaimRunsInput): Promise<AuthorizedRunClaimRecord[]> {
     return this.write(async () => {
       const device = this.activeDevice(deviceId);
       device.lastSeenAt = new Date().toISOString();
@@ -1150,10 +1150,11 @@ export class MemoryPlatformRepository implements PlatformRepository {
         .filter((candidate) => candidate.deviceId === device.id && candidate.status === 'queued')
         .sort((left, right) => left.queuedAt.localeCompare(right.queuedAt))
         .slice(0, input.limit);
-      const result: RunClaim[] = [];
+      const result: AuthorizedRunClaimRecord[] = [];
       for (const run of claimed) {
+        let grant: PermissionGrant;
         try {
-          await this.requireActivePermissionGrant({
+          grant = await this.requireActivePermissionGrant({
             deviceId: device.id,
             releaseId: run.releaseId,
             now: new Date(),
@@ -1198,6 +1199,10 @@ export class MemoryPlatformRepository implements PlatformRepository {
           version: release.version,
           args: [...run.input.args],
           requiresElevation: run.requiresElevation,
+          applicationId: run.applicationId,
+          releaseId: run.releaseId,
+          capabilityHash: grant.capabilityHash,
+          grantExpiresAt: grant.expiresAt,
         });
       }
       return result;
@@ -1292,6 +1297,8 @@ export class MemoryPlatformRepository implements PlatformRepository {
         slug: input.slug,
         name: input.name,
         summary: input.summary,
+        defaultLocale: input.defaultLocale ?? 'en-US',
+        localizations: input.localizations ?? {},
         kind: input.kind,
         createdAt: new Date().toISOString(),
       };
@@ -1587,6 +1594,8 @@ export class MemoryPlatformRepository implements PlatformRepository {
       slug: application.slug,
       name: application.name,
       summary: application.summary,
+      defaultLocale: application.defaultLocale,
+      localizations: application.localizations,
       kind: application.kind,
       releaseId: release.id,
       version: release.version,
@@ -1637,7 +1646,7 @@ export class MemoryPlatformRepository implements PlatformRepository {
     return revision;
   }
 
-  private scheduleRecord(schedule: Schedule): ScheduleRecord {
+  private scheduleRecord(schedule: Schedule): ScheduleRecordIntent {
     const application =
       this.applications.find((candidate) => candidate.id === schedule.applicationId) ??
       notFound('Application');
@@ -1645,6 +1654,9 @@ export class MemoryPlatformRepository implements PlatformRepository {
       this.releases.find((candidate) => candidate.id === schedule.releaseId) ?? notFound('Release');
     return {
       scheduleId: schedule.id,
+      revision: schedule.revision,
+      applicationId: schedule.applicationId,
+      releaseId: schedule.releaseId,
       appId: application.slug,
       version: release.version,
       cronExpression: schedule.cronExpression,

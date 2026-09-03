@@ -10,7 +10,11 @@ export class ZodPipe<T> implements PipeTransform<unknown, T> {
       throw new BadRequestException({
         code: 'validation_failed',
         message: 'Request validation failed',
-        errors: result.error.flatten(),
+        errors: result.error.issues.map(({ code, message: _message, path, ...params }) => ({
+          code,
+          path,
+          ...(Object.keys(params).length ? { params } : {}),
+        })),
       });
     return result.data;
   }

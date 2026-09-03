@@ -5,8 +5,10 @@ import { BrowserRouter } from 'react-router-dom';
 
 import { AuthGate } from '../components/AuthGate';
 import { ShellLayout } from '../components/ShellLayout';
+import { useI18n } from '../i18n/I18nProvider';
 
 export function App() {
+  const { arcoLocale } = useI18n();
   const [queryClient] = useState(
     () =>
       new QueryClient({
@@ -17,7 +19,7 @@ export function App() {
   );
 
   return (
-    <ConfigProvider componentConfig={{ Card: { bordered: false } }}>
+    <ConfigProvider locale={arcoLocale} componentConfig={{ Card: { bordered: false } }}>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <AuthGate>

@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   ApprovePermissionGrantInputSchema,
+  AuthorizationLeaseSchema,
   DeviceCredentialSchema,
   DeviceSchema,
   ListDevicesQuerySchema,
@@ -19,6 +20,7 @@ import {
   UpdateInstallationStatusInputSchema,
   UpdateScheduleInputSchema,
   applyScheduleDelta,
+  canonicalizeAuthorizationLeaseClaims,
 } from './index.js';
 
 const firstScheduleId = '11111111-1111-4111-8111-111111111111';
@@ -30,6 +32,44 @@ const applicationId = '77777777-7777-4777-8777-777777777777';
 const releaseId = '88888888-8888-4888-8888-888888888888';
 const grantId = '99999999-9999-4999-8999-999999999999';
 const capabilityHash = 'a'.repeat(64);
+
+const authorizationLease = (
+  kind: 'schedule' | 'run',
+  id: string,
+  revision = 1,
+  appId = 'sample-desktop',
+  version = '1.2.3',
+) => ({
+  claims: {
+    schemaVersion: 1 as const,
+    leaseId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    revision,
+    deviceId,
+    applicationId,
+    releaseId,
+    appId,
+    version,
+    task: { kind, id },
+    capabilityHash,
+    intentHash: 'b'.repeat(64),
+    issuedAt: 1_800_000_000_000,
+    expiresAt: 1_800_000_300_000,
+  },
+  signature: { algorithm: 'ed25519' as const, keyId: 'lease-test-key', value: 'A'.repeat(88) },
+});
+
+test('authorization lease contract is bounded, task-scoped and canonical', () => {
+  const lease = AuthorizationLeaseSchema.parse(authorizationLease('run', firstScheduleId));
+  assert.equal(lease.claims.task.id, firstScheduleId);
+  assert.match(canonicalizeAuthorizationLeaseClaims(lease.claims), /^\{"appId":/u);
+  assert.equal(
+    AuthorizationLeaseSchema.safeParse({
+      ...lease,
+      claims: { ...lease.claims, expiresAt: lease.claims.issuedAt },
+    }).success,
+    false,
+  );
+});
 
 test('device registration returns an explicit one-time credential outside the public device shape', () => {
   const credential = `awd_${'A'.repeat(43)}`;
@@ -176,6 +216,7 @@ test('run claims contain the complete Agent execution projection', () => {
     version: '1.2.3',
     args: ['--mode', 'scheduled'],
     requiresElevation: false,
+    authorizationLease: authorizationLease('run', '33333333-3333-4333-8333-333333333333'),
   });
 
   assert.deepEqual(claim.args, ['--mode', 'scheduled']);
@@ -188,6 +229,9 @@ test('schedule sync snapshots match the Agent shape and deltas reconstruct a ful
     schedules: [
       {
         scheduleId: firstScheduleId,
+        revision: 4,
+        applicationId,
+        releaseId,
         appId: 'sample-desktop',
         version: '1.0.0',
         cronExpression: '0 2 * * *',
@@ -195,6 +239,7 @@ test('schedule sync snapshots match the Agent shape and deltas reconstruct a ful
         nextRunAtMs: 1_800_000_000_000,
         args: ['--old'],
         enabled: true,
+        authorizationLease: authorizationLease('schedule', firstScheduleId, 4, 'sample-desktop', '1.0.0'),
       },
     ],
   });
@@ -206,12 +251,16 @@ test('schedule sync snapshots match the Agent shape and deltas reconstruct a ful
     upserts: [
       {
         scheduleId: secondScheduleId,
+        revision: 5,
+        applicationId,
+        releaseId,
         appId: 'another-desktop',
         cronExpression: '0 2 * * *',
         timezone: 'Asia/Shanghai',
         nextRunAtMs: 1_800_000_100_000,
         args: [],
         enabled: false,
+        authorizationLease: authorizationLease('schedule', secondScheduleId, 5, 'another-desktop'),
       },
     ],
     removedScheduleIds: [firstScheduleId],
@@ -223,12 +272,16 @@ test('schedule sync snapshots match the Agent shape and deltas reconstruct a ful
     schedules: [
       {
         scheduleId: secondScheduleId,
+        revision: 5,
+        applicationId,
+        releaseId,
         appId: 'another-desktop',
         cronExpression: '0 2 * * *',
         timezone: 'Asia/Shanghai',
         nextRunAtMs: 1_800_000_100_000,
         args: [],
         enabled: false,
+        authorizationLease: authorizationLease('schedule', secondScheduleId, 5, 'another-desktop'),
       },
     ],
   });
@@ -256,12 +309,16 @@ test('schedule deltas reject ambiguous mutations and schedule updates require op
       upserts: [
         {
           scheduleId: firstScheduleId,
+          revision: 1,
+          applicationId,
+          releaseId,
           appId: 'sample-desktop',
           cronExpression: '0 2 * * *',
           timezone: 'UTC',
           nextRunAtMs: 1_000,
           args: [],
           enabled: true,
+          authorizationLease: authorizationLease('schedule', firstScheduleId),
         },
       ],
       removedScheduleIds: [firstScheduleId],

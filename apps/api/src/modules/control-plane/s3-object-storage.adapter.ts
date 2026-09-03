@@ -40,7 +40,13 @@ export class S3ObjectStorageAdapter implements ObjectStoragePort {
       ChecksumSHA256: checksum,
       Metadata: { 'aw-sha256': declaration.sha256 },
     });
-    const url = await getSignedUrl(this.publicClient, command, { expiresIn: UPLOAD_EXPIRY_SECONDS });
+    // Keep integrity headers in SigV4 SignedHeaders. The presigner otherwise
+    // hoists x-amz-* values into the query string; sending the documented
+    // upload headers as well is then rejected by MinIO as unsigned headers.
+    const url = await getSignedUrl(this.publicClient, command, {
+      expiresIn: UPLOAD_EXPIRY_SECONDS,
+      unhoistableHeaders: new Set(['x-amz-checksum-sha256', 'x-amz-meta-aw-sha256']),
+    });
     return {
       method: 'PUT',
       url,
@@ -53,9 +59,17 @@ export class S3ObjectStorageAdapter implements ObjectStoragePort {
     };
   }
 
-  async createDownload(key: string): Promise<SignedDownload> {
+  async createWorkerDownload(key: string): Promise<SignedDownload> {
+    return this.createDownload(this.internalClient, key);
+  }
+
+  async createDeviceDownload(key: string): Promise<SignedDownload> {
+    return this.createDownload(this.publicClient, key);
+  }
+
+  private async createDownload(client: S3Client, key: string): Promise<SignedDownload> {
     const url = await getSignedUrl(
-      this.internalClient,
+      client,
       new GetObjectCommand({ Bucket: this.config.S3_BUCKET, Key: key }),
       { expiresIn: DOWNLOAD_EXPIRY_SECONDS },
     );

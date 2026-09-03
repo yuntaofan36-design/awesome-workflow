@@ -11,9 +11,11 @@ import {
 import type { SbomDescriptor } from '@awesome-workflow/contracts';
 
 import { type ArchiveEntry, buildDeterministicZip, collectArchiveEntries, sha256 } from './archive.js';
+import { cliText } from './i18n.js';
 import { CliError, SecretRedactor, isRecord, requireEnvironmentSecret } from './safety.js';
 
 const UNSIGNED_PLACEHOLDER = 'UNSIGNED_TEMPLATE_REPLACED_BY_AW_PACKAGE_000000000000000000000000';
+const FEDERATION_DIGEST_PLACEHOLDER = '__AW_FEDERATION_SHA256__';
 
 export type PackageSbomMetadata = {
   primary: { path: string; descriptor: SbomDescriptor };
@@ -75,6 +77,7 @@ export async function initializeManifest(options: {
   };
   let manifest: unknown;
   if (options.kind === 'web') {
+    const developmentOrigin = 'http://localhost:5173';
     manifest = {
       schemaVersion: 1,
       kind: 'web',
@@ -89,8 +92,17 @@ export async function initializeManifest(options: {
       capabilities: ['context.read', 'navigation'],
       remoteName: remoteName(options.appId),
       exposedModule: './App',
-      manifestUrl: 'http://localhost:5173/mf-manifest.json',
+      manifestUrl: `${developmentOrigin}/releases/${FEDERATION_DIGEST_PLACEHOLDER}/mf-manifest.json`,
       integritySha256: '0'.repeat(64),
+      resourceOrigins: [developmentOrigin],
+      contentSecurityPolicy: {
+        defaultSrc: ["'none'"],
+        scriptSrc: ["'self'", developmentOrigin],
+        styleSrc: ["'self'", developmentOrigin],
+        imgSrc: ["'self'", 'data:', developmentOrigin],
+        connectSrc: ["'self'", developmentOrigin],
+        frameSrc: [],
+      },
     };
   } else {
     const artifact = {
@@ -107,7 +119,7 @@ export async function initializeManifest(options: {
       appId: options.appId,
       version: '0.1.0',
       name: options.name ?? options.appId,
-      description: 'Desktop micro-application',
+      description: cliText('manifest.desktopDescription'),
       artifacts: [artifact],
       integrity: { algorithm: 'sha256', digest: await computeArtifactSetIntegritySha256([artifact]) },
       signature,
@@ -135,7 +147,7 @@ export async function initializeManifest(options: {
     });
   } catch (error) {
     if (isNodeError(error) && error.code === 'EEXIST') {
-      throw new CliError(`Refusing to overwrite existing manifest: ${options.outputPath}`);
+      throw new CliError(cliText('package.manifestExists', { path: options.outputPath }));
     }
     throw error;
   }
@@ -148,12 +160,12 @@ export async function readArtifactInputMap(path: string): Promise<ArtifactInput[
   try {
     value = JSON.parse(await readFile(absolutePath, 'utf8')) as unknown;
   } catch {
-    throw new CliError(`Artifact map is missing or is not valid JSON: ${path}`);
+    throw new CliError(cliText('package.artifactMapUnreadable', { path }));
   }
   if (!isRecord(value) || value.schemaVersion !== 1 || !Array.isArray(value.artifacts)) {
-    throw new CliError('Artifact map must contain schemaVersion 1 and an artifacts array.');
+    throw new CliError(cliText('package.artifactMapShape'));
   }
-  if (value.artifacts.length === 0) throw new CliError('Artifact map must contain at least one artifact.');
+  if (value.artifacts.length === 0) throw new CliError(cliText('package.artifactMapEmpty'));
   return value.artifacts.map((candidate, index) => {
     if (
       !isRecord(candidate) ||
@@ -163,7 +175,7 @@ export async function readArtifactInputMap(path: string): Promise<ArtifactInput[
       !candidate.input ||
       candidate.input.includes('\0')
     ) {
-      throw new CliError(`Artifact map entry ${index + 1} must contain a valid name and input path.`);
+      throw new CliError(cliText('package.artifactMapEntry', { index: index + 1 }));
     }
     return { name: candidate.name, inputDirectory: resolve(dirname(absolutePath), candidate.input) };
   });
@@ -181,8 +193,7 @@ export async function packageRelease(options: {
   environment?: NodeJS.ProcessEnv;
   redactor?: SecretRedactor;
 }): Promise<PackageResult> {
-  if (!options.keyId || options.keyId.length > 160)
-    throw new CliError('--key-id must contain 1 to 160 characters.');
+  if (!options.keyId || options.keyId.length > 160) throw new CliError(cliText('package.keyId'));
   const outputDirectory = resolve(options.outputDirectory);
   const manifest = await readManifest(options.manifestPath);
   const legacyMode = options.artifactInputs === undefined;
@@ -214,7 +225,7 @@ export async function packageRelease(options: {
       };
     }),
   );
-  builtArtifacts.sort((left, right) => left.name.localeCompare(right.name));
+  builtArtifacts.sort((left, right) => compareCodePoints(left.name, right.name));
 
   let updatedArtifacts = manifest.artifacts;
   for (const artifact of builtArtifacts) {
@@ -318,28 +329,24 @@ export async function readPackageMetadata(metadataPath: string): Promise<{
   try {
     value = JSON.parse(await readFile(absoluteMetadataPath, 'utf8')) as unknown;
   } catch {
-    throw new CliError('Package metadata is missing or invalid. Run `aw package` first.');
+    throw new CliError(cliText('package.metadataUnreadable'));
   }
   const metadata = parsePackageMetadata(value);
   const manifest = await readManifest(resolvePackageChild(directory, metadata.manifestPath));
   const artifactMetadata =
     metadata.schemaVersion === 1 ? [{ ...metadata.artifact, sbom: metadata.sbom }] : metadata.artifacts;
   if (artifactMetadata.length !== manifest.artifacts.length) {
-    throw new CliError('Package metadata does not contain the complete signed manifest artifact set.');
+    throw new CliError(cliText('package.metadataArtifactSet'));
   }
   const artifacts = await Promise.all(
     artifactMetadata.map(async (artifact) => {
       const artifactBytes = await readFile(resolvePackageChild(directory, artifact.path));
       const sbomBytes = await readFile(resolvePackageChild(directory, artifact.sbom.primary.path));
       if (artifactBytes.length !== artifact.size || sha256(artifactBytes) !== artifact.sha256) {
-        throw new CliError(
-          `Packaged artifact ${artifact.name} bytes no longer match package metadata. Re-run \`aw package\`.`,
-        );
+        throw new CliError(cliText('package.artifactBytesChanged', { name: artifact.name }));
       }
       if (sha256(sbomBytes) !== artifact.sbom.primary.descriptor.sha256) {
-        throw new CliError(
-          `Packaged SBOM for ${artifact.name} no longer matches package metadata. Re-run \`aw package\`.`,
-        );
+        throw new CliError(cliText('package.sbomBytesChanged', { name: artifact.name }));
       }
       const declaration = manifest.artifacts.find((candidate) => candidate.name === artifact.name);
       if (
@@ -349,7 +356,7 @@ export async function readPackageMetadata(metadataPath: string): Promise<{
         declaration.size !== artifact.size ||
         declaration.sha256 !== artifact.sha256
       ) {
-        throw new CliError('Package metadata does not match the signed manifest artifact declaration.');
+        throw new CliError(cliText('package.metadataDeclaration'));
       }
       return { metadata: artifact, artifactBytes, sbomBytes };
     }),
@@ -412,17 +419,15 @@ async function loadPrivateKey(options: {
   redactor?: SecretRedactor;
 }): Promise<KeyObject> {
   if (Boolean(options.privateKeyPath) === Boolean(options.privateKeyEnvironmentName)) {
-    throw new CliError('Provide exactly one of --private-key PATH or --private-key-env NAME.');
+    throw new CliError(cliText('package.keyExactlyOne'));
   }
   let serialized: string | Buffer;
   if (options.privateKeyPath) {
     const keyPath = resolve(options.privateKeyPath);
     const metadata = await stat(keyPath);
-    if (!metadata.isFile()) throw new CliError('Publisher private key path is not a regular file.');
+    if (!metadata.isFile()) throw new CliError(cliText('package.keyNotFile'));
     if (process.platform !== 'win32' && (metadata.mode & 0o077) !== 0) {
-      throw new CliError(
-        'Publisher private key file must not be readable by group or other users (expected mode 0600).',
-      );
+      throw new CliError(cliText('package.keyPermissions'));
     }
     serialized = await readFile(keyPath);
   } else {
@@ -439,9 +444,9 @@ async function loadPrivateKey(options: {
       ? createPrivateKey(text)
       : createPrivateKey({ key: Buffer.from(text.trim(), 'base64'), format: 'der', type: 'pkcs8' });
   } catch {
-    throw new CliError('Publisher private key must be an Ed25519 PKCS#8 PEM or base64-encoded DER value.');
+    throw new CliError(cliText('package.keyFormat'));
   }
-  if (key.asymmetricKeyType !== 'ed25519') throw new CliError('Publisher private key must use Ed25519.');
+  if (key.asymmetricKeyType !== 'ed25519') throw new CliError(cliText('package.keyAlgorithm'));
   return key;
 }
 
@@ -454,13 +459,18 @@ async function readManifest(path: string): Promise<ReleaseManifest> {
   try {
     value = JSON.parse(await readFile(resolve(path), 'utf8')) as unknown;
   } catch {
-    throw new CliError(`Manifest is missing or is not valid JSON: ${path}`);
+    throw new CliError(cliText('error.manifestMissing', { path }));
   }
   const parsed = ReleaseManifestSchema.safeParse(value);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     throw new CliError(
-      `Manifest validation failed${issue ? ` at ${issue.path.join('.') || '<root>'}: ${issue.message}` : '.'}`,
+      issue
+        ? cliText('error.manifestValidationAt', {
+            path: issue.path.join('.') || '/',
+            code: issue.code,
+          })
+        : cliText('error.manifestValidation'),
     );
   }
   return parsed.data;
@@ -484,55 +494,61 @@ function selectArtifactInputs(
 ): ArtifactInput[] {
   if (options.artifactInputs !== undefined) {
     if (options.inputDirectory || options.artifactName) {
-      throw new CliError('Artifact-map packaging cannot be combined with --input or --artifact-name.');
+      throw new CliError(cliText('package.artifactMapConflict'));
     }
     if (manifest.kind !== 'desktop') {
-      throw new CliError('Artifact-map packaging is supported only for desktop release manifests.');
+      throw new CliError(cliText('package.artifactMapDesktopOnly'));
     }
     if (options.artifactInputs.length === 0) {
-      throw new CliError('Artifact map must contain at least one artifact.');
+      throw new CliError(cliText('package.artifactMapEmpty'));
     }
     const names = new Set<string>();
     for (const input of options.artifactInputs) {
-      if (names.has(input.name)) throw new CliError(`Artifact map contains duplicate name: ${input.name}`);
+      if (names.has(input.name)) {
+        throw new CliError(cliText('package.artifactMapDuplicate', { name: input.name }));
+      }
       names.add(input.name);
       if (!manifest.artifacts.some((artifact) => artifact.name === input.name)) {
-        throw new CliError(`Artifact map name is not declared by the manifest: ${input.name}`);
+        throw new CliError(cliText('package.artifactMapUndeclared', { name: input.name }));
       }
     }
     const missing = manifest.artifacts.filter((artifact) => !names.has(artifact.name));
     if (missing.length > 0) {
       throw new CliError(
-        `Artifact map must cover the complete manifest artifact set; missing: ${missing
-          .map((artifact) => artifact.name)
-          .join(', ')}`,
+        cliText('package.artifactMapMissing', {
+          names: missing.map((artifact) => artifact.name).join(', '),
+        }),
       );
     }
-    return [...options.artifactInputs].sort((left, right) => left.name.localeCompare(right.name));
+    return [...options.artifactInputs].sort((left, right) => compareCodePoints(left.name, right.name));
   }
-  if (!options.inputDirectory) throw new CliError('Package input directory is required.');
+  if (!options.inputDirectory) throw new CliError(cliText('package.inputRequired'));
   return [
     { name: selectArtifactName(manifest, options.artifactName), inputDirectory: options.inputDirectory },
   ];
 }
 
+function compareCodePoints(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function selectArtifactName(manifest: ReleaseManifest, requested: string | undefined): string {
   if (manifest.artifacts.length > 1) {
-    throw new CliError(
-      'Manifest declares multiple artifacts; use --artifact-map so one package contains the complete release artifact set.',
-    );
+    throw new CliError(cliText('package.multipleArtifacts'));
   }
   if (requested) {
-    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(requested)) throw new CliError('--artifact-name is invalid.');
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(requested)) {
+      throw new CliError(cliText('package.artifactNameInvalid'));
+    }
     const existing = manifest.artifacts[0];
     if (existing && existing.name !== requested) {
-      throw new CliError('--artifact-name must match the manifest artifact when one is already declared.');
+      throw new CliError(cliText('package.artifactNameMismatch'));
     }
     return requested;
   }
   if (manifest.artifacts.length === 1) return manifest.artifacts[0]!.name;
   if (manifest.artifacts.length === 0 && manifest.kind === 'web') return 'web-bundle';
-  throw new CliError('Desktop manifest must declare at least one artifact.');
+  throw new CliError(cliText('package.desktopArtifactRequired'));
 }
 
 function updateRuntimeIntegrity(
@@ -543,11 +559,16 @@ function updateRuntimeIntegrity(
   const fileName = basename(new URL(manifest.manifestUrl).pathname);
   const matches = entries.filter((entry) => entry.name === fileName || entry.name.endsWith(`/${fileName}`));
   if (matches.length !== 1) {
+    throw new CliError(cliText('package.federationManifestCount', { fileName }));
+  }
+  const integritySha256 = sha256(matches[0]!.bytes);
+  const manifestUrl = manifest.manifestUrl.replace(FEDERATION_DIGEST_PLACEHOLDER, integritySha256);
+  if (!new URL(manifestUrl).pathname.toLowerCase().includes(integritySha256)) {
     throw new CliError(
-      `Federation package must contain exactly one ${fileName} so integritySha256 can be bound.`,
+      cliText('package.federationDigestBinding', { placeholder: FEDERATION_DIGEST_PLACEHOLDER }),
     );
   }
-  return { ...manifest, integritySha256: sha256(matches[0]!.bytes) };
+  return { ...manifest, integritySha256, manifestUrl };
 }
 
 function validateRuntimeFiles(
@@ -559,9 +580,7 @@ function validateRuntimeFiles(
   const names = new Set(entries.map((entry) => entry.name));
   for (const runtime of manifest.runtimes.filter((candidate) => candidate.artifact === artifactName)) {
     if (!names.has(runtime.entry))
-      throw new CliError(
-        `Desktop runtime entry for artifact ${artifactName} is missing from package input: ${runtime.entry}`,
-      );
+      throw new CliError(cliText('package.runtimeEntryMissing', { artifactName, entry: runtime.entry }));
   }
 }
 
@@ -572,7 +591,7 @@ function omitSbom(artifact: PackagedArtifactMetadata): Omit<PackagedArtifactMeta
 
 function parsePackageMetadata(value: unknown): PackageMetadata {
   if (!isRecord(value) || typeof value.manifestPath !== 'string') {
-    throw new CliError('Package metadata has an unsupported shape.');
+    throw new CliError(cliText('package.metadataShape'));
   }
   if (value.schemaVersion === 1 && isRecord(value.artifact)) {
     const artifact = parsePackagedArtifact({ ...value.artifact, sbom: value.sbom });
@@ -588,23 +607,23 @@ function parsePackageMetadata(value: unknown): PackageMetadata {
     const names = new Set<string>();
     const paths = new Set<string>();
     for (const artifact of artifacts) {
-      if (names.has(artifact.name)) throw new CliError('Package metadata contains duplicate artifact names.');
+      if (names.has(artifact.name)) throw new CliError(cliText('package.metadataDuplicateNames'));
       names.add(artifact.name);
       if (artifact.sbom.primary.path !== artifact.sbom.cyclonedxPath) {
-        throw new CliError('Primary SBOM path must match the CycloneDX package path.');
+        throw new CliError(cliText('package.primarySbomPath'));
       }
       for (const path of [artifact.path, artifact.sbom.cyclonedxPath, artifact.sbom.spdxPath]) {
-        if (paths.has(path)) throw new CliError('Package metadata contains duplicate file paths.');
+        if (paths.has(path)) throw new CliError(cliText('package.metadataDuplicatePaths'));
         paths.add(path);
       }
     }
     return { schemaVersion: 2, manifestPath: value.manifestPath, artifacts };
   }
-  throw new CliError('Package metadata has an unsupported shape.');
+  throw new CliError(cliText('package.metadataShape'));
 }
 
 function parsePackagedArtifact(value: unknown): PackagedArtifactMetadata {
-  if (!isRecord(value)) throw new CliError('Package artifact metadata has an unsupported shape.');
+  if (!isRecord(value)) throw new CliError(cliText('package.artifactMetadataShape'));
   const sbom = parseSbomMetadata(value.sbom);
   if (
     typeof value.name !== 'string' ||
@@ -619,7 +638,7 @@ function parsePackagedArtifact(value: unknown): PackagedArtifactMetadata {
     !/^[a-f0-9]{64}$/.test(value.sha256) ||
     !isPublisherSignature(value.signature)
   ) {
-    throw new CliError('Package artifact metadata has an unsupported shape.');
+    throw new CliError(cliText('package.artifactMetadataShape'));
   }
   return {
     name: value.name,
@@ -635,11 +654,11 @@ function parsePackagedArtifact(value: unknown): PackagedArtifactMetadata {
 
 function parseSbomMetadata(value: unknown): PackageSbomMetadata {
   if (!isRecord(value) || !isRecord(value.primary)) {
-    throw new CliError('Package metadata is missing its primary SBOM.');
+    throw new CliError(cliText('package.primarySbomMissing'));
   }
   const primary = value.primary;
   if (!isRecord(primary.descriptor)) {
-    throw new CliError('Package metadata is missing its primary SBOM descriptor.');
+    throw new CliError(cliText('package.primarySbomDescriptorMissing'));
   }
   const descriptor = primary.descriptor;
   if (
@@ -652,7 +671,7 @@ function parseSbomMetadata(value: unknown): PackageSbomMetadata {
     typeof value.cyclonedxPath !== 'string' ||
     typeof value.spdxPath !== 'string'
   ) {
-    throw new CliError('Package SBOM metadata has an unsupported shape.');
+    throw new CliError(cliText('package.sbomMetadataShape'));
   }
   return {
     primary: {
@@ -680,22 +699,21 @@ function isPublisherSignature(value: unknown): value is PublisherSignature {
 
 function resolvePackageChild(directory: string, child: string): string {
   if (!child || isAbsolute(child) || child.includes('\\'))
-    throw new CliError('Package metadata contains an unsafe file path.');
+    throw new CliError(cliText('package.unsafeMetadataPath'));
   const components = child.split('/');
   if (components.some((component) => component === '' || component === '.' || component === '..')) {
-    throw new CliError('Package metadata contains an unsafe file path.');
+    throw new CliError(cliText('package.unsafeMetadataPath'));
   }
   const absolute = resolve(directory, ...components);
   const rel = relative(directory, absolute);
-  if (rel.startsWith('..') || isAbsolute(rel))
-    throw new CliError('Package metadata file path escapes its directory.');
+  if (rel.startsWith('..') || isAbsolute(rel)) throw new CliError(cliText('package.metadataPathEscape'));
   return absolute;
 }
 
 function assertOutputOutsideInput(inputDirectory: string, outputDirectory: string): void {
   const rel = relative(inputDirectory, outputDirectory);
   if (rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))) {
-    throw new CliError('Package output directory must be outside the package input directory.');
+    throw new CliError(cliText('package.outputInsideInput'));
   }
 }
 

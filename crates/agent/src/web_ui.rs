@@ -71,6 +71,8 @@ struct WebUiBootstrap<'a> {
     lease: &'a str,
     rpc_endpoint: &'static str,
     work_directory: String,
+    locale: String,
+    fallback_locales: Vec<String>,
 }
 
 struct ServerContext {
@@ -125,6 +127,7 @@ pub(crate) fn start(
         .ok_or_else(|| AgentError::PathEscape(task.log_path.display().to_string()))?
         .to_string_lossy()
         .into_owned();
+    let locale_context = agent.task_context(&task.app_id, &task.task_id)?;
     let bootstrap = serde_json::to_vec(&WebUiBootstrap {
         protocol_version: RPC_PROTOCOL_VERSION,
         app_id: &task.app_id,
@@ -132,6 +135,8 @@ pub(crate) fn start(
         lease: &lease.value,
         rpc_endpoint: WEB_UI_RPC_PATH,
         work_directory,
+        locale: locale_context.locale,
+        fallback_locales: locale_context.fallback_locales,
     })?;
     let encoded_bootstrap = URL_SAFE_NO_PAD.encode(bootstrap);
     let mut launch_url = Url::parse(&origin)
@@ -647,6 +652,8 @@ mod tests {
                 kind: ManifestKind::Desktop,
                 name: "Web UI Test".into(),
                 description: String::new(),
+                default_locale: "en-US".into(),
+                localizations: Default::default(),
                 runtimes: vec![RuntimeSpec {
                     platform: TargetPlatform::WINDOWS_X64,
                     artifact: "web-ui".into(),

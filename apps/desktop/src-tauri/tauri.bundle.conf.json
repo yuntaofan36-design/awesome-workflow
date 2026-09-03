@@ -4,7 +4,8 @@
     "resources": [
       "sidecars/awesome-workflow-agent*",
       "sidecars/awesome-workflow-runner*",
-      "sidecars/awesome-workflow-elevated-helper*"
+      "sidecars/awesome-workflow-elevated-helper*",
+      "trusted-authorization-lease-public-key*.json"
     ]
   }
 }

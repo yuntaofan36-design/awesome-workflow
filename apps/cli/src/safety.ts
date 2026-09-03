@@ -1,3 +1,5 @@
+import { cliText } from './i18n.js';
+
 export class CliError extends Error {
   constructor(
     message: string,
@@ -41,10 +43,10 @@ export function requireEnvironmentSecret(
   redactor?: SecretRedactor,
 ): string {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
-    throw new CliError('Environment variable names must contain only letters, digits, and underscores.');
+    throw new CliError(cliText('environment.invalidName'));
   }
   const value = environment[name];
-  if (!value) throw new CliError(`Environment variable ${name} is empty or missing.`);
+  if (!value) throw new CliError(cliText('environment.missing', { name }));
   redactor?.add(value);
   return value;
 }

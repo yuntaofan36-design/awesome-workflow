@@ -88,6 +88,44 @@ const CspSourceSchema = z
   .max(240)
   .refine((source) => !/[;\r\n]/.test(source), 'CSP sources cannot contain directives or newlines');
 
+/**
+ * Federation resources are executable in the shell document, so an origin is
+ * an identity, not a URL prefix. Only canonical HTTPS origins (plus explicit
+ * loopback HTTP origins for local development) can be signed into a manifest.
+ */
+export const WebResourceOriginSchema = z
+  .string()
+  .url()
+  .superRefine((value, context) => {
+    let url: URL;
+    try {
+      url = new URL(value);
+    } catch {
+      return;
+    }
+    const isLoopbackHttp =
+      url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+    if (url.protocol !== 'https:' && !isLoopbackHttp) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Federation resource origins require HTTPS except for loopback development',
+      });
+    }
+    if (
+      url.origin !== value ||
+      url.pathname !== '/' ||
+      url.search !== '' ||
+      url.hash !== '' ||
+      url.username !== '' ||
+      url.password !== ''
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Federation resource origins must be canonical origins without paths or credentials',
+      });
+    }
+  });
+
 export const WebContentSecurityPolicySchema = z.object({
   defaultSrc: z.array(CspSourceSchema).min(1).default(["'none'"]),
   scriptSrc: z.array(CspSourceSchema).default(["'self'"]),
@@ -97,6 +135,95 @@ export const WebContentSecurityPolicySchema = z.object({
   frameSrc: z.array(CspSourceSchema).default([]),
 });
 export type WebContentSecurityPolicy = z.infer<typeof WebContentSecurityPolicySchema>;
+
+type FederationPolicyInput = {
+  contentSecurityPolicy: WebContentSecurityPolicy;
+  manifestUrl: string;
+  resourceOrigins: string[];
+};
+
+type FederationPolicyIssue = { message: string; path: Array<string | number> };
+
+/**
+ * Re-checkable semantic policy used by both the schema and release Worker.
+ * The three executable/fetch directives are exact sets: a publisher cannot
+ * smuggle a wildcard, scheme source, or a second undeclared CDN into CSP.
+ */
+export function assertFederationWebPolicy(manifest: FederationPolicyInput): void {
+  const issues = federationPolicyIssues(manifest);
+  if (issues.length > 0) throw new Error(issues.map((issue) => issue.message).join('; '));
+}
+
+/** A production Federation manifest URL must carry its verified digest in its immutable path. */
+export function assertContentAddressedFederationManifestUrl(manifestUrl: string, digest: string): void {
+  const url = new URL(manifestUrl);
+  if (!url.pathname.toLowerCase().includes(digest.toLowerCase())) {
+    throw new Error('Federation manifest URL must be content-addressed by integritySha256');
+  }
+}
+
+function federationPolicyIssues(manifest: FederationPolicyInput): FederationPolicyIssue[] {
+  const issues: FederationPolicyIssue[] = [];
+  const manifestUrl = new URL(manifest.manifestUrl);
+  if (
+    manifestUrl.username !== '' ||
+    manifestUrl.password !== '' ||
+    manifestUrl.hash !== '' ||
+    !manifest.resourceOrigins.includes(manifestUrl.origin)
+  ) {
+    issues.push({
+      path: ['manifestUrl'],
+      message: 'Federation manifestUrl must use a declared resource origin without credentials or fragments',
+    });
+  }
+
+  const { contentSecurityPolicy: csp } = manifest;
+  if (csp.defaultSrc.length !== 1 || csp.defaultSrc[0] !== "'none'") {
+    issues.push({
+      path: ['contentSecurityPolicy', 'defaultSrc'],
+      message: "Federation defaultSrc must be exactly 'none'",
+    });
+  }
+
+  const requiredRemoteSources = new Set(["'self'", ...manifest.resourceOrigins]);
+  for (const [directive, sources] of [
+    ['scriptSrc', csp.scriptSrc],
+    ['styleSrc', csp.styleSrc],
+    ['connectSrc', csp.connectSrc],
+  ] as const) {
+    if (!sameStringSet(sources, requiredRemoteSources)) {
+      issues.push({
+        path: ['contentSecurityPolicy', directive],
+        message: `Federation ${directive} must contain only 'self' and every declared resource origin`,
+      });
+    }
+  }
+
+  const allowedImageSources = new Set(["'self'", 'data:', 'blob:', ...manifest.resourceOrigins]);
+  if (csp.imgSrc.some((source) => !allowedImageSources.has(source)) || hasDuplicates(csp.imgSrc)) {
+    issues.push({
+      path: ['contentSecurityPolicy', 'imgSrc'],
+      message: 'Federation imgSrc contains an undeclared or duplicate source',
+    });
+  }
+  if (csp.frameSrc.length !== 0) {
+    issues.push({
+      path: ['contentSecurityPolicy', 'frameSrc'],
+      message: 'Federation frameSrc must be empty; untrusted frames use the iframe runtime',
+    });
+  }
+  return issues;
+}
+
+function sameStringSet(values: string[], expected: ReadonlySet<string>): boolean {
+  return (
+    !hasDuplicates(values) && values.length === expected.size && values.every((value) => expected.has(value))
+  );
+}
+
+function hasDuplicates(values: string[]): boolean {
+  return new Set(values).size !== values.length;
+}
 
 const webManifestBase = z.object({
   ...manifestIdentity,
@@ -114,14 +241,29 @@ const webManifestBase = z.object({
   }),
 });
 
-export const FederationWebManifestSchema = webManifestBase.extend({
-  runtime: z.literal('federation'),
-  trustTier: z.literal('trusted').default('trusted'),
-  remoteName: z.string().regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/),
-  exposedModule: z.string().regex(/^\.\/[A-Za-z0-9_./-]+$/),
-  manifestUrl: HttpUrlSchema,
-  integritySha256: Sha256Schema,
-});
+export const FederationWebManifestSchema = webManifestBase
+  .extend({
+    runtime: z.literal('federation'),
+    trustTier: z.literal('trusted').default('trusted'),
+    remoteName: z.string().regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/),
+    exposedModule: z.string().regex(/^\.\/[A-Za-z0-9_./-]+$/),
+    manifestUrl: HttpUrlSchema,
+    integritySha256: Sha256Schema,
+    resourceOrigins: z
+      .array(WebResourceOriginSchema)
+      .min(1)
+      .max(16)
+      .refine(
+        (origins) => new Set(origins).size === origins.length,
+        'Federation resource origins must be unique',
+      ),
+  })
+  .superRefine((value, context) => {
+    for (const issue of federationPolicyIssues(value)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, ...issue });
+    }
+  });
+export type FederationWebManifest = z.infer<typeof FederationWebManifestSchema>;
 
 export const IframeWebManifestSchema = webManifestBase
   .extend({
@@ -246,12 +388,32 @@ export const DesktopRuntimeSchema = z.discriminatedUnion('kind', [
 ]);
 export type DesktopRuntime = z.infer<typeof DesktopRuntimeSchema>;
 
+export const ManifestLocaleSchema = z.enum(['en-US', 'zh-CN']);
+export type ManifestLocale = z.infer<typeof ManifestLocaleSchema>;
+
+export const DesktopManifestLocalizationsSchema = z
+  .object({
+    'en-US': z
+      .object({ name: z.string().min(2).max(80).optional(), description: z.string().max(240).optional() })
+      .strict()
+      .optional(),
+    'zh-CN': z
+      .object({ name: z.string().min(2).max(80).optional(), description: z.string().max(240).optional() })
+      .strict()
+      .optional(),
+  })
+  .strict()
+  .default({});
+export type DesktopManifestLocalizations = z.infer<typeof DesktopManifestLocalizationsSchema>;
+
 export const DesktopReleaseManifestSchema = z
   .object({
     ...manifestIdentity,
     kind: z.literal('desktop'),
     name: z.string().min(2).max(80),
     description: z.string().max(240),
+    defaultLocale: ManifestLocaleSchema.default('en-US'),
+    localizations: DesktopManifestLocalizationsSchema,
     runtimes: z.array(DesktopRuntimeSchema).min(1),
     dependencies: z.array(DesktopDependencySchema).default([]),
     capabilities: z.array(DesktopCapabilitySchema).default([]),
@@ -344,7 +506,7 @@ export function canonicalizeManifestForSignature(manifest: ReleaseManifest): str
 /** Integrity binds the canonical artifact descriptor set, sorted by name. */
 export function canonicalizeArtifactDescriptorSet(artifacts: ManifestArtifact[]): string {
   const parsed = z.array(ManifestArtifactSchema).parse(artifacts);
-  return canonicalJson([...parsed].sort((left, right) => left.name.localeCompare(right.name)));
+  return canonicalJson([...parsed].sort((left, right) => compareCodePoints(left.name, right.name)));
 }
 
 export async function computeArtifactSetIntegritySha256(artifacts: ManifestArtifact[]): Promise<string> {
@@ -379,7 +541,7 @@ function normalizeCapabilitySetValue(value: unknown): unknown {
     const normalized = value.map(normalizeCapabilitySetValue);
     const unique = new Map(normalized.map((entry) => [canonicalJson(entry), entry]));
     return [...unique.entries()]
-      .sort(([left], [right]) => left.localeCompare(right))
+      .sort(([left], [right]) => compareCodePoints(left, right))
       .map(([, entry]) => entry);
   }
   if (value && typeof value === 'object') {
@@ -402,7 +564,7 @@ function canonicalJson(value: unknown): string {
   }
   if (value && typeof value === 'object') {
     return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
+      .sort(([left], [right]) => compareCodePoints(left, right))
       .map(([key, nested]) => `${JSON.stringify(key)}:${canonicalJson(nested)}`)
       .join(',')}}`;
   }
@@ -411,4 +573,9 @@ function canonicalJson(value: unknown): string {
     throw new TypeError('Value is not valid canonical JSON');
   }
   return encoded;
+}
+
+/** Locale-independent ordering for signed and hashed data. */
+function compareCodePoints(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }

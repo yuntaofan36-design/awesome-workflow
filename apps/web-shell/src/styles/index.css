@@ -2,6 +2,11 @@
 @import '@arco-design/web-react/dist/css/arco.css';
 @import '@awesome-workflow/ui/theme.css';
 
+:lang(zh-CN) {
+  --aw-font-body: 'Microsoft YaHei UI', 'PingFang SC', 'Noto Sans CJK SC', 'Segoe UI', sans-serif;
+  --aw-font-display: 'Microsoft YaHei UI', 'PingFang SC', 'Noto Sans CJK SC', 'Segoe UI', sans-serif;
+}
+
 * {
   box-sizing: border-box;
 }

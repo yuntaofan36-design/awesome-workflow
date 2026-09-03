@@ -39,11 +39,9 @@ import type {
   RequestInstallationInput,
   Run,
   RunCancellation,
-  RunClaim,
   Schedule,
-  ScheduleRecord,
+  ScheduleRecordIntent,
   ScheduleSyncQuery,
-  ScheduleSyncResult,
   UpdateScheduleInput,
   Workspace,
   WorkspaceRole,
@@ -60,12 +58,14 @@ import type {
   InstallationSyncIndex,
   OidcTransactionRecord,
   ApprovePermissionGrantRecordInput,
+  AuthorizedRunClaimRecord,
   PermissionGrantRequirementInput,
   PlatformRepository,
   RefreshSessionInput,
   ReleaseInput,
   RotateRefreshSessionInput,
   RotateRefreshSessionResult,
+  ScheduleSyncIntentResult,
 } from '../core/repository.js';
 import type { Database, DatabaseClient } from '../db/database.js';
 import {
@@ -316,7 +316,7 @@ export class PostgresPlatformRepository implements PlatformRepository, OnModuleD
         await transaction.insert(workspaces).values({
           id: workspaceId,
           slug: `${slugBase.slice(0, 48)}-${workspaceId.slice(0, 8)}`,
-          name: `${input.displayName}'s workspace`,
+          name: input.displayName,
           createdBy: id,
         });
         await transaction.insert(workspaceMemberships).values({ workspaceId, userId: id, role: 'owner' });
@@ -1647,7 +1647,7 @@ export class PostgresPlatformRepository implements PlatformRepository, OnModuleD
     });
   }
 
-  async syncSchedules(deviceId: string, input: ScheduleSyncQuery): Promise<ScheduleSyncResult> {
+  async syncSchedules(deviceId: string, input: ScheduleSyncQuery): Promise<ScheduleSyncIntentResult> {
     return this.database.transaction(
       async (transaction) => {
         const device =
@@ -1813,7 +1813,7 @@ export class PostgresPlatformRepository implements PlatformRepository, OnModuleD
             left.revision - right.revision ||
             (left.operation === right.operation ? 0 : left.operation === 'remove' ? -1 : 1),
         );
-        const upserts = new Map<string, ScheduleRecord>();
+        const upserts = new Map<string, ScheduleRecordIntent>();
         const removed = new Set<string>();
         for (const change of changes) {
           if (change.operation === 'remove') {
@@ -2016,7 +2016,7 @@ export class PostgresPlatformRepository implements PlatformRepository, OnModuleD
     });
   }
 
-  async claimRuns(deviceId: string, input: ClaimRunsInput): Promise<RunClaim[]> {
+  async claimRuns(deviceId: string, input: ClaimRunsInput): Promise<AuthorizedRunClaimRecord[]> {
     return this.database.transaction(async (transaction) => {
       const device =
         (
@@ -2133,6 +2133,14 @@ export class PostgresPlatformRepository implements PlatformRepository, OnModuleD
       return authorizedRuns.map((run) => {
         const application = applicationById.get(run.applicationId) ?? notFound('Application');
         const release = releaseById.get(run.releaseId) ?? notFound('Release');
+        const capabilityHash = capabilityHashByReleaseId.get(run.releaseId) ?? permissionApprovalRequired();
+        const grant =
+          grantRows.find(
+            (candidate) =>
+              candidate.releaseId === run.releaseId &&
+              candidate.capabilityHash === capabilityHash &&
+              permissionGrantIsActiveAt(candidate, now),
+          ) ?? permissionApprovalRequired();
         return {
           runId: run.id,
           attempt: run.attempt,
@@ -2140,6 +2148,10 @@ export class PostgresPlatformRepository implements PlatformRepository, OnModuleD
           version: release.version,
           args: mapExecutionInput(run.input).args,
           requiresElevation: run.requiresElevation,
+          applicationId: run.applicationId,
+          releaseId: run.releaseId,
+          capabilityHash,
+          grantExpiresAt: grant.expiresAt?.toISOString() ?? null,
         };
       });
     });
@@ -2295,7 +2307,12 @@ export class PostgresPlatformRepository implements PlatformRepository, OnModuleD
         conflict('application_slug_exists', 'An application already uses that slug in this workspace');
       const [row] = await transaction
         .insert(applications)
-        .values({ id: randomUUID(), ...input })
+        .values({
+          id: randomUUID(),
+          ...input,
+          defaultLocale: input.defaultLocale ?? 'en-US',
+          localizations: input.localizations ?? {},
+        })
         .returning();
       if (!row) throw new Error('Failed to create application');
       await transaction
@@ -2758,6 +2775,8 @@ const mapApplication = (row: ApplicationRow): Application => ({
   slug: row.slug,
   name: row.name,
   summary: row.summary,
+  defaultLocale: row.defaultLocale,
+  localizations: row.localizations,
   kind: row.kind,
   createdAt: row.createdAt.toISOString(),
 });
@@ -2809,6 +2828,8 @@ const mapCatalog = (
   slug: application.slug,
   name: application.name,
   summary: application.summary,
+  defaultLocale: application.defaultLocale,
+  localizations: application.localizations,
   kind: application.kind,
   releaseId: release.id,
   version: release.version,
@@ -2880,8 +2901,11 @@ const mapSchedule = (row: ScheduleRow): Schedule => ({
   updatedAt: row.updatedAt.toISOString(),
   createdAt: row.createdAt.toISOString(),
 });
-const mapScheduleRecord = (row: ScheduleRow, appId: string, version: string): ScheduleRecord => ({
+const mapScheduleRecord = (row: ScheduleRow, appId: string, version: string): ScheduleRecordIntent => ({
   scheduleId: row.id,
+  revision: row.revision,
+  applicationId: row.applicationId,
+  releaseId: row.releaseId,
   appId,
   version,
   cronExpression: row.cronExpression,

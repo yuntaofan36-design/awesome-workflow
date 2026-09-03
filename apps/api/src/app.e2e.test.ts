@@ -68,19 +68,37 @@ test('Nest/Fastify API enforces auth, RBAC, immutable release review, promotion 
     method: 'POST',
     url: `/api/v1/workspaces/${workspace.id}/applications`,
     cookies: { aw_session: reviewer.cookie },
-    payload: { slug: 'sample-web', name: 'Sample web', summary: 'End-to-end test', kind: 'web' },
+    payload: {
+      slug: 'sample-web',
+      name: 'Sample web',
+      summary: 'End-to-end test',
+      defaultLocale: 'en-US',
+      localizations: { 'zh-CN': { name: '示例 Web 应用', summary: '端到端测试' } },
+      kind: 'web',
+    },
   });
   assert.equal(applicationResponse.statusCode, 201);
-  const application = applicationResponse.json().data as { id: string };
+  const application = applicationResponse.json().data as {
+    id: string;
+    defaultLocale: string;
+    localizations: Record<string, unknown>;
+  };
+  assert.equal(application.defaultLocale, 'en-US');
+  assert.ok(application.localizations['zh-CN']);
 
   const outsider = await login(server, 'outsider@example.test');
   const forbiddenResponse = await server.inject({
     method: 'GET',
     url: `/api/v1/workspaces/${workspace.id}/applications`,
     cookies: { aw_session: outsider.cookie },
+    headers: { 'accept-language': 'zh-CN, en;q=0.5' },
   });
   assert.equal(forbiddenResponse.statusCode, 403);
   assert.match(String(forbiddenResponse.headers['content-type']), /application\/problem\+json/);
+  assert.equal(forbiddenResponse.headers['content-language'], 'zh-CN');
+  assert.match(String(forbiddenResponse.headers.vary), /Accept-Language/i);
+  assert.equal(forbiddenResponse.json().code, 'forbidden');
+  assert.equal(forbiddenResponse.json().title, '禁止访问');
 
   const artifactDeclaration = {
     name: 'web-bundle',

@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   DesktopReleaseManifestSchema,
+  FederationWebManifestSchema,
   IframeWebManifestSchema,
   LinkWebManifestSchema,
   canonicalizeArtifactDescriptorSet,
@@ -31,6 +32,111 @@ const identity = {
   integrity: { algorithm: 'sha256' as const, digest },
   signature,
 };
+
+const federationManifest = {
+  ...identity,
+  kind: 'web' as const,
+  runtime: 'federation' as const,
+  routeBase: '/federated-app',
+  remoteName: 'federated_app',
+  exposedModule: './app',
+  manifestUrl: 'https://cdn.example.test/releases/abc/mf-manifest.json',
+  integritySha256: digest,
+  resourceOrigins: ['https://cdn.example.test'],
+  contentSecurityPolicy: {
+    defaultSrc: ["'none'"],
+    scriptSrc: ["'self'", 'https://cdn.example.test'],
+    styleSrc: ["'self'", 'https://cdn.example.test'],
+    imgSrc: ["'self'", 'data:', 'https://cdn.example.test'],
+    connectSrc: ["'self'", 'https://cdn.example.test'],
+    frameSrc: [],
+  },
+};
+
+test('federation manifests bind the entry and CSP to exact resource origins', () => {
+  assert.equal(FederationWebManifestSchema.safeParse(federationManifest).success, true);
+  assert.equal(
+    FederationWebManifestSchema.safeParse({
+      ...federationManifest,
+      resourceOrigins: ['https://assets.example.test'],
+    }).success,
+    false,
+  );
+  assert.equal(
+    FederationWebManifestSchema.safeParse({
+      ...federationManifest,
+      contentSecurityPolicy: {
+        ...federationManifest.contentSecurityPolicy,
+        scriptSrc: ["'self'", 'https://cdn.example.test', 'https://evil.example.test'],
+      },
+    }).success,
+    false,
+  );
+});
+
+test('federation resource origins reject mutable paths and non-loopback HTTP', () => {
+  for (const resourceOrigin of [
+    'https://cdn.example.test/assets',
+    'https://cdn.example.test/',
+    'http://cdn.example.test',
+    'https://user@cdn.example.test',
+  ]) {
+    assert.equal(
+      FederationWebManifestSchema.safeParse({ ...federationManifest, resourceOrigins: [resourceOrigin] })
+        .success,
+      false,
+    );
+  }
+  const loopbackOrigin = 'http://127.0.0.1:4302';
+  assert.equal(
+    FederationWebManifestSchema.safeParse({
+      ...federationManifest,
+      manifestUrl: `${loopbackOrigin}/mf-manifest.json`,
+      resourceOrigins: [loopbackOrigin],
+      contentSecurityPolicy: {
+        ...federationManifest.contentSecurityPolicy,
+        scriptSrc: ["'self'", loopbackOrigin],
+        styleSrc: ["'self'", loopbackOrigin],
+        imgSrc: ["'self'", 'data:', loopbackOrigin],
+        connectSrc: ["'self'", loopbackOrigin],
+      },
+    }).success,
+    true,
+  );
+  const ipv6LoopbackOrigin = 'http://[::1]:4302';
+  assert.equal(
+    FederationWebManifestSchema.safeParse({
+      ...federationManifest,
+      manifestUrl: `${ipv6LoopbackOrigin}/mf-manifest.json`,
+      resourceOrigins: [ipv6LoopbackOrigin],
+      contentSecurityPolicy: {
+        ...federationManifest.contentSecurityPolicy,
+        scriptSrc: ["'self'", ipv6LoopbackOrigin],
+        styleSrc: ["'self'", ipv6LoopbackOrigin],
+        imgSrc: ["'self'", 'data:', ipv6LoopbackOrigin],
+        connectSrc: ["'self'", ipv6LoopbackOrigin],
+      },
+    }).success,
+    true,
+  );
+});
+
+test('federation CSP rejects unsafe executable and framing sources', () => {
+  for (const contentSecurityPolicy of [
+    { ...federationManifest.contentSecurityPolicy, scriptSrc: ["'self'", '*'] },
+    {
+      ...federationManifest.contentSecurityPolicy,
+      scriptSrc: ["'self'", 'https://cdn.example.test', "'unsafe-eval'"],
+    },
+    { ...federationManifest.contentSecurityPolicy, defaultSrc: ['*'] },
+    { ...federationManifest.contentSecurityPolicy, frameSrc: ['https://cdn.example.test'] },
+  ]) {
+    assert.equal(
+      FederationWebManifestSchema.safeParse({ ...federationManifest, contentSecurityPolicy }).success,
+      false,
+    );
+  }
+});
 
 test('iframe origins must match exactly', () => {
   const result = IframeWebManifestSchema.safeParse({
@@ -225,6 +331,72 @@ test('artifact-set integrity is independent of descriptor order', async () => {
   assert.equal(
     await computeArtifactSetIntegritySha256(artifacts),
     await computeArtifactSetIntegritySha256([...artifacts].reverse()),
+  );
+});
+
+test('signed artifact ordering is locale-independent code-point order', () => {
+  const descriptors = [
+    {
+      name: 'a-runtime',
+      fileName: 'a.zip',
+      mediaType: 'application/zip',
+      size: 1,
+      sha256: 'a'.repeat(64),
+    },
+    {
+      name: 'Z-runtime',
+      fileName: 'z.zip',
+      mediaType: 'application/zip',
+      size: 1,
+      sha256: 'b'.repeat(64),
+    },
+  ];
+  const canonical = canonicalizeArtifactDescriptorSet(descriptors);
+  assert.ok(canonical.indexOf('Z-runtime') < canonical.indexOf('a-runtime'));
+});
+
+test('desktop localized metadata is signed and constrained to supported locales', () => {
+  const desktopManifest = {
+    ...identity,
+    artifacts: [
+      {
+        name: 'runtime',
+        fileName: 'runtime.zip',
+        mediaType: 'application/zip',
+        size: 1,
+        sha256: digest,
+        platform: { os: 'windows' as const, arch: 'x64' as const },
+      },
+    ],
+    kind: 'desktop' as const,
+    name: 'Localized app',
+    description: 'Canonical description',
+    runtimes: [
+      {
+        kind: 'native' as const,
+        platform: { os: 'windows' as const, arch: 'x64' as const },
+        artifact: 'runtime',
+        entry: 'app.exe',
+      },
+    ],
+    dependencies: [],
+    capabilities: [],
+    runMode: 'singleton' as const,
+    minHostVersion: '1.0.0',
+  };
+  const manifest = DesktopReleaseManifestSchema.parse({
+    ...desktopManifest,
+    defaultLocale: 'zh-CN',
+    localizations: { 'en-US': { name: 'English name', description: 'English description' } },
+  });
+  assert.equal(manifest.defaultLocale, 'zh-CN');
+  assert.match(canonicalizeManifestForSignature(manifest), /English name/);
+  assert.equal(
+    DesktopReleaseManifestSchema.safeParse({
+      ...desktopManifest,
+      localizations: { 'fr-FR': { name: 'Nom' } },
+    }).success,
+    false,
   );
 });
 

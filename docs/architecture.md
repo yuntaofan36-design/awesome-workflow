@@ -138,6 +138,16 @@ is checked against the manifest capability set.
 The third `link` runtime is navigation only and requires an HTTPS destination
 bound into the approved, signed manifest. It receives no host bridge.
 
+### Locale flow
+
+`system | en-US | zh-CN` is resolved at each host boundary into a concrete
+locale snapshot. The Web Shell owns its preference and sends only the resolved
+locale, fallbacks, direction, and time zone through `locale.getCurrent()` and
+`locale.changed`; each Federation or iframe application owns an independent
+message catalog. API requests negotiate human-readable errors and login email
+with `Accept-Language`, while application metadata travels as canonical content
+plus optional locale overlays.
+
 ## Desktop runtime flow
 
 The Tauri WebView manages UI and consent but does not schedule or execute work.
@@ -153,6 +163,13 @@ credential. Privileged lifecycle actions use a one-shot helper with an exact
 allowlist; an unattended job becomes `needs_user_approval` rather than opening
 an elevation prompt or silently escalating.
 
+The Tauri UI resolves and persists its own display preference, then synchronizes
+the resolved locale to the authenticated Agent management endpoint. The Agent
+persists the latest setting and copies it into a task-specific SQLite row at
+task creation. Runner environment and Web UI task context read that frozen row,
+not the current UI or Manifest default, so offline and already-running tasks are
+deterministic.
+
 ## Persistence ownership
 
 | Data                                       | Authority                          | Cache / replica       |
@@ -162,5 +179,6 @@ an elevation prompt or silently escalating.
 | artifacts, SBOM, provenance                | S3-compatible store                | CDN by content digest |
 | validation jobs                            | PostgreSQL state + BullMQ delivery | worker process        |
 | desktop installation/run/schedule snapshot | API/PostgreSQL                     | Agent SQLite          |
+| desktop display locale and task snapshots  | user / task creation boundary      | Agent SQLite          |
 | desktop secrets                            | OIDC provider                      | OS Keychain only      |
 | audit events                               | PostgreSQL append-only interface   | OTLP export           |

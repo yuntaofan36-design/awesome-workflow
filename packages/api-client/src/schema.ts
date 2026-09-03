@@ -36,6 +36,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/password/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["loginWithPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/email/challenges": {
         parameters: {
             query?: never;
@@ -720,6 +736,24 @@ export interface components {
             slug: string;
             name: string;
             summary: string;
+            /**
+             * @default en-US
+             * @enum {string}
+             */
+            defaultLocale: "en-US" | "zh-CN";
+            /** @default {} */
+            localizations: {
+                "en-US"?: {
+                    name?: string;
+                    summary?: string;
+                    description?: string;
+                };
+                "zh-CN"?: {
+                    name?: string;
+                    summary?: string;
+                    description?: string;
+                };
+            };
             /** @enum {string} */
             kind: "web" | "desktop";
             /** Format: date-time */
@@ -757,7 +791,7 @@ export interface components {
                 id: string;
                 validator: string;
                 /** @enum {string} */
-                check: "manifest" | "digest" | "signature" | "sbom" | "archive" | "platform" | "permissions";
+                check: "manifest" | "csp" | "digest" | "signature" | "sbom" | "archive" | "platform" | "permissions";
                 /** @enum {string} */
                 outcome: "passed" | "failed";
                 /** Format: date-time */
@@ -774,14 +808,16 @@ export interface components {
         };
         AuthProvider: {
             /** @enum {string} */
-            id: "email" | "google" | "feishu" | "wechat";
+            id: "email" | "password" | "google" | "feishu" | "wechat";
             label: string;
             /** @enum {string} */
-            protocol: "email_otp" | "oidc";
+            labelKey: "auth.provider.email" | "auth.provider.password" | "auth.provider.google" | "auth.provider.feishu" | "auth.provider.wechat";
+            /** @enum {string} */
+            protocol: "email_otp" | "password" | "oidc";
             /** @enum {string} */
             status: "active" | "configured" | "disabled";
             /** @enum {string} */
-            strategy?: "local_email_otp" | "oidc_broker";
+            strategy?: "local_email_otp" | "local_password" | "oidc_broker";
             /** Format: uri */
             authorizeUrl?: string;
         };
@@ -1144,7 +1180,7 @@ export interface components {
                     id: string;
                     validator: string;
                     /** @enum {string} */
-                    check: "manifest" | "digest" | "signature" | "sbom" | "archive" | "platform" | "permissions";
+                    check: "manifest" | "csp" | "digest" | "signature" | "sbom" | "archive" | "platform" | "permissions";
                     /** @enum {string} */
                     outcome: "passed" | "failed";
                     /** Format: date-time */
@@ -1172,6 +1208,24 @@ export interface components {
                 slug: string;
                 name: string;
                 summary: string;
+                /**
+                 * @default en-US
+                 * @enum {string}
+                 */
+                defaultLocale: "en-US" | "zh-CN";
+                /** @default {} */
+                localizations: {
+                    "en-US"?: {
+                        name?: string;
+                        summary?: string;
+                        description?: string;
+                    };
+                    "zh-CN"?: {
+                        name?: string;
+                        summary?: string;
+                        description?: string;
+                    };
+                };
                 /** @enum {string} */
                 kind: "web" | "desktop";
                 /** Format: date-time */
@@ -1340,7 +1394,7 @@ export interface components {
                     id: string;
                     validator: string;
                     /** @enum {string} */
-                    check: "manifest" | "digest" | "signature" | "sbom" | "archive" | "platform" | "permissions";
+                    check: "manifest" | "csp" | "digest" | "signature" | "sbom" | "archive" | "platform" | "permissions";
                     /** @enum {string} */
                     outcome: "passed" | "failed";
                     /** Format: date-time */
@@ -1502,6 +1556,83 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["AuthProvider"][];
+                    };
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not authorized */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description State conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    loginWithPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: email */
+                    email: string;
+                    password: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CurrentUser"];
+                    };
+                };
+            };
+            /** @description Successful response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CurrentUser"];
                     };
                 };
             };
@@ -1715,6 +1846,7 @@ export interface operations {
             query?: {
                 provider?: "google" | "feishu" | "wechat";
                 returnTo?: string;
+                uiLocales?: "en-US" | "zh-CN";
             };
             header?: never;
             path?: never;
@@ -1805,6 +1937,8 @@ export interface operations {
                     codeChallengeMethod: "S256";
                     /** @enum {string} */
                     scope?: "openid profile email offline_access";
+                    /** @enum {string} */
+                    locale?: "en-US" | "zh-CN";
                     state: string;
                 };
             };
@@ -3048,6 +3182,22 @@ export interface operations {
                                         kind: "desktop";
                                         name: string;
                                         description: string;
+                                        /**
+                                         * @default en-US
+                                         * @enum {string}
+                                         */
+                                        defaultLocale: "en-US" | "zh-CN";
+                                        /** @default {} */
+                                        localizations: {
+                                            "en-US"?: {
+                                                name?: string;
+                                                description?: string;
+                                            };
+                                            "zh-CN"?: {
+                                                name?: string;
+                                                description?: string;
+                                            };
+                                        };
                                         runtimes: ({
                                             platform: {
                                                 /** @enum {string} */
@@ -3247,6 +3397,22 @@ export interface operations {
                                         kind: "desktop";
                                         name: string;
                                         description: string;
+                                        /**
+                                         * @default en-US
+                                         * @enum {string}
+                                         */
+                                        defaultLocale: "en-US" | "zh-CN";
+                                        /** @default {} */
+                                        localizations: {
+                                            "en-US"?: {
+                                                name?: string;
+                                                description?: string;
+                                            };
+                                            "zh-CN"?: {
+                                                name?: string;
+                                                description?: string;
+                                            };
+                                        };
                                         runtimes: ({
                                             platform: {
                                                 /** @enum {string} */
@@ -4535,6 +4701,11 @@ export interface operations {
                                 schedules: {
                                     /** Format: uuid */
                                     scheduleId: string;
+                                    revision: number;
+                                    /** Format: uuid */
+                                    applicationId: string;
+                                    /** Format: uuid */
+                                    releaseId: string;
                                     appId: string;
                                     version?: string;
                                     cronExpression: string;
@@ -4544,6 +4715,46 @@ export interface operations {
                                     /** @default [] */
                                     args: string[];
                                     enabled: boolean;
+                                    authorizationLease: {
+                                        claims: {
+                                            /** @enum {number} */
+                                            schemaVersion: 1;
+                                            /** Format: uuid */
+                                            leaseId: string;
+                                            revision: number;
+                                            /** Format: uuid */
+                                            deviceId: string;
+                                            /** Format: uuid */
+                                            applicationId: string;
+                                            /** Format: uuid */
+                                            releaseId: string;
+                                            appId: string;
+                                            version: string;
+                                            task: {
+                                                /** @enum {string} */
+                                                kind: "schedule";
+                                                /** Format: uuid */
+                                                id: string;
+                                            } | {
+                                                /** @enum {string} */
+                                                kind: "run";
+                                                /** Format: uuid */
+                                                id: string;
+                                            };
+                                            capabilityHash: string;
+                                            intentHash: string;
+                                            /** @description Unix epoch milliseconds */
+                                            issuedAt: number;
+                                            /** @description Unix epoch milliseconds */
+                                            expiresAt: number;
+                                        };
+                                        signature: {
+                                            /** @enum {string} */
+                                            algorithm: "ed25519";
+                                            keyId: string;
+                                            value: string;
+                                        };
+                                    };
                                 }[];
                             };
                         } | {
@@ -4555,6 +4766,11 @@ export interface operations {
                                 upserts: {
                                     /** Format: uuid */
                                     scheduleId: string;
+                                    revision: number;
+                                    /** Format: uuid */
+                                    applicationId: string;
+                                    /** Format: uuid */
+                                    releaseId: string;
                                     appId: string;
                                     version?: string;
                                     cronExpression: string;
@@ -4564,6 +4780,46 @@ export interface operations {
                                     /** @default [] */
                                     args: string[];
                                     enabled: boolean;
+                                    authorizationLease: {
+                                        claims: {
+                                            /** @enum {number} */
+                                            schemaVersion: 1;
+                                            /** Format: uuid */
+                                            leaseId: string;
+                                            revision: number;
+                                            /** Format: uuid */
+                                            deviceId: string;
+                                            /** Format: uuid */
+                                            applicationId: string;
+                                            /** Format: uuid */
+                                            releaseId: string;
+                                            appId: string;
+                                            version: string;
+                                            task: {
+                                                /** @enum {string} */
+                                                kind: "schedule";
+                                                /** Format: uuid */
+                                                id: string;
+                                            } | {
+                                                /** @enum {string} */
+                                                kind: "run";
+                                                /** Format: uuid */
+                                                id: string;
+                                            };
+                                            capabilityHash: string;
+                                            intentHash: string;
+                                            /** @description Unix epoch milliseconds */
+                                            issuedAt: number;
+                                            /** @description Unix epoch milliseconds */
+                                            expiresAt: number;
+                                        };
+                                        signature: {
+                                            /** @enum {string} */
+                                            algorithm: "ed25519";
+                                            keyId: string;
+                                            value: string;
+                                        };
+                                    };
                                 }[];
                                 removedScheduleIds: string[];
                             };
@@ -4586,6 +4842,11 @@ export interface operations {
                                 schedules: {
                                     /** Format: uuid */
                                     scheduleId: string;
+                                    revision: number;
+                                    /** Format: uuid */
+                                    applicationId: string;
+                                    /** Format: uuid */
+                                    releaseId: string;
                                     appId: string;
                                     version?: string;
                                     cronExpression: string;
@@ -4595,6 +4856,46 @@ export interface operations {
                                     /** @default [] */
                                     args: string[];
                                     enabled: boolean;
+                                    authorizationLease: {
+                                        claims: {
+                                            /** @enum {number} */
+                                            schemaVersion: 1;
+                                            /** Format: uuid */
+                                            leaseId: string;
+                                            revision: number;
+                                            /** Format: uuid */
+                                            deviceId: string;
+                                            /** Format: uuid */
+                                            applicationId: string;
+                                            /** Format: uuid */
+                                            releaseId: string;
+                                            appId: string;
+                                            version: string;
+                                            task: {
+                                                /** @enum {string} */
+                                                kind: "schedule";
+                                                /** Format: uuid */
+                                                id: string;
+                                            } | {
+                                                /** @enum {string} */
+                                                kind: "run";
+                                                /** Format: uuid */
+                                                id: string;
+                                            };
+                                            capabilityHash: string;
+                                            intentHash: string;
+                                            /** @description Unix epoch milliseconds */
+                                            issuedAt: number;
+                                            /** @description Unix epoch milliseconds */
+                                            expiresAt: number;
+                                        };
+                                        signature: {
+                                            /** @enum {string} */
+                                            algorithm: "ed25519";
+                                            keyId: string;
+                                            value: string;
+                                        };
+                                    };
                                 }[];
                             };
                         } | {
@@ -4606,6 +4907,11 @@ export interface operations {
                                 upserts: {
                                     /** Format: uuid */
                                     scheduleId: string;
+                                    revision: number;
+                                    /** Format: uuid */
+                                    applicationId: string;
+                                    /** Format: uuid */
+                                    releaseId: string;
                                     appId: string;
                                     version?: string;
                                     cronExpression: string;
@@ -4615,6 +4921,46 @@ export interface operations {
                                     /** @default [] */
                                     args: string[];
                                     enabled: boolean;
+                                    authorizationLease: {
+                                        claims: {
+                                            /** @enum {number} */
+                                            schemaVersion: 1;
+                                            /** Format: uuid */
+                                            leaseId: string;
+                                            revision: number;
+                                            /** Format: uuid */
+                                            deviceId: string;
+                                            /** Format: uuid */
+                                            applicationId: string;
+                                            /** Format: uuid */
+                                            releaseId: string;
+                                            appId: string;
+                                            version: string;
+                                            task: {
+                                                /** @enum {string} */
+                                                kind: "schedule";
+                                                /** Format: uuid */
+                                                id: string;
+                                            } | {
+                                                /** @enum {string} */
+                                                kind: "run";
+                                                /** Format: uuid */
+                                                id: string;
+                                            };
+                                            capabilityHash: string;
+                                            intentHash: string;
+                                            /** @description Unix epoch milliseconds */
+                                            issuedAt: number;
+                                            /** @description Unix epoch milliseconds */
+                                            expiresAt: number;
+                                        };
+                                        signature: {
+                                            /** @enum {string} */
+                                            algorithm: "ed25519";
+                                            keyId: string;
+                                            value: string;
+                                        };
+                                    };
                                 }[];
                                 removedScheduleIds: string[];
                             };
@@ -5075,6 +5421,46 @@ export interface operations {
                             /** @default [] */
                             args: string[];
                             requiresElevation: boolean;
+                            authorizationLease: {
+                                claims: {
+                                    /** @enum {number} */
+                                    schemaVersion: 1;
+                                    /** Format: uuid */
+                                    leaseId: string;
+                                    revision: number;
+                                    /** Format: uuid */
+                                    deviceId: string;
+                                    /** Format: uuid */
+                                    applicationId: string;
+                                    /** Format: uuid */
+                                    releaseId: string;
+                                    appId: string;
+                                    version: string;
+                                    task: {
+                                        /** @enum {string} */
+                                        kind: "schedule";
+                                        /** Format: uuid */
+                                        id: string;
+                                    } | {
+                                        /** @enum {string} */
+                                        kind: "run";
+                                        /** Format: uuid */
+                                        id: string;
+                                    };
+                                    capabilityHash: string;
+                                    intentHash: string;
+                                    /** @description Unix epoch milliseconds */
+                                    issuedAt: number;
+                                    /** @description Unix epoch milliseconds */
+                                    expiresAt: number;
+                                };
+                                signature: {
+                                    /** @enum {string} */
+                                    algorithm: "ed25519";
+                                    keyId: string;
+                                    value: string;
+                                };
+                            };
                         }[];
                     };
                 };
@@ -5095,6 +5481,46 @@ export interface operations {
                             /** @default [] */
                             args: string[];
                             requiresElevation: boolean;
+                            authorizationLease: {
+                                claims: {
+                                    /** @enum {number} */
+                                    schemaVersion: 1;
+                                    /** Format: uuid */
+                                    leaseId: string;
+                                    revision: number;
+                                    /** Format: uuid */
+                                    deviceId: string;
+                                    /** Format: uuid */
+                                    applicationId: string;
+                                    /** Format: uuid */
+                                    releaseId: string;
+                                    appId: string;
+                                    version: string;
+                                    task: {
+                                        /** @enum {string} */
+                                        kind: "schedule";
+                                        /** Format: uuid */
+                                        id: string;
+                                    } | {
+                                        /** @enum {string} */
+                                        kind: "run";
+                                        /** Format: uuid */
+                                        id: string;
+                                    };
+                                    capabilityHash: string;
+                                    intentHash: string;
+                                    /** @description Unix epoch milliseconds */
+                                    issuedAt: number;
+                                    /** @description Unix epoch milliseconds */
+                                    expiresAt: number;
+                                };
+                                signature: {
+                                    /** @enum {string} */
+                                    algorithm: "ed25519";
+                                    keyId: string;
+                                    value: string;
+                                };
+                            };
                         }[];
                     };
                 };
@@ -5491,6 +5917,24 @@ export interface operations {
                     slug: string;
                     name: string;
                     summary: string;
+                    /**
+                     * @default en-US
+                     * @enum {string}
+                     */
+                    defaultLocale?: "en-US" | "zh-CN";
+                    /** @default {} */
+                    localizations?: {
+                        "en-US"?: {
+                            name?: string;
+                            summary?: string;
+                            description?: string;
+                        };
+                        "zh-CN"?: {
+                            name?: string;
+                            summary?: string;
+                            description?: string;
+                        };
+                    };
                     /** @enum {string} */
                     kind: "web" | "desktop";
                 };
@@ -6395,7 +6839,7 @@ export interface operations {
                             id: string;
                             validator: string;
                             /** @enum {string} */
-                            check: "manifest" | "digest" | "signature" | "sbom" | "archive" | "platform" | "permissions";
+                            check: "manifest" | "csp" | "digest" | "signature" | "sbom" | "archive" | "platform" | "permissions";
                             /** @enum {string} */
                             outcome: "passed" | "failed";
                             /** Format: date-time */
@@ -6411,7 +6855,7 @@ export interface operations {
                         id: string;
                         validator: string;
                         /** @enum {string} */
-                        check: "manifest" | "digest" | "signature" | "sbom" | "archive" | "platform" | "permissions";
+                        check: "manifest" | "csp" | "digest" | "signature" | "sbom" | "archive" | "platform" | "permissions";
                         /** @enum {string} */
                         outcome: "passed" | "failed";
                         /** Format: date-time */

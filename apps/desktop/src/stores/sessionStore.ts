@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 
+import { normalizeUiError, type UiError } from '@/i18n/errors';
 import { sessionApi, type AuthProvider } from '@/services/session';
 import type { CurrentUser } from '@/types';
 
@@ -9,9 +10,9 @@ type SessionState = {
   user: CurrentUser | null;
   expiresAt: string | null;
   providers: AuthProvider[];
-  error: string | null;
+  error: UiError | null;
   initialize: () => Promise<void>;
-  login: () => Promise<void>;
+  login: (locale: 'en-US' | 'zh-CN') => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -25,11 +26,11 @@ export const useSessionStore = create<SessionState>()((set) => ({
   initialize: async () => {
     set({ loading: true, error: null });
     let providers: AuthProvider[] = [];
-    let providerError: string | null = null;
+    let providerError: UiError | null = null;
     try {
       providers = await sessionApi.providers();
     } catch (error) {
-      providerError = describe(error);
+      providerError = normalizeUiError(error, 'auth_providers_failed');
     }
     try {
       const session = await sessionApi.current();
@@ -48,29 +49,37 @@ export const useSessionStore = create<SessionState>()((set) => ({
         providers,
         user: null,
         expiresAt: null,
-        error: describe(error),
+        error: normalizeUiError(error, 'session_restore_failed'),
       });
     }
   },
-  login: async () => {
+  login: async (locale) => {
     set({ loading: true, error: null });
     try {
-      const session = await sessionApi.login();
+      const session = await sessionApi.login(locale);
       set({ user: session.user, expiresAt: session.expiresAt, loading: false });
     } catch (error) {
-      set({ user: null, expiresAt: null, error: describe(error), loading: false });
+      set({
+        user: null,
+        expiresAt: null,
+        error: normalizeUiError(error, 'sign_in_failed'),
+        loading: false,
+      });
     }
   },
   logout: async () => {
     try {
       await sessionApi.logout();
-    } finally {
       set({ user: null, expiresAt: null, error: null });
+    } catch (error) {
+      set({
+        user: null,
+        expiresAt: null,
+        error: normalizeUiError(error, 'sign_out_failed'),
+      });
     }
   },
 }));
-
-const describe = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 export const selectSessionInitialized = (state: SessionState) => state.initialized;
 export const selectSessionLoading = (state: SessionState) => state.loading;

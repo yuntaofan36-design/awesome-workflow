@@ -20,3 +20,25 @@ test('email challenge rate limiter keys on normalized email and client IP', asyn
       error instanceof DomainError && error.status === 429 && error.code === 'auth_rate_limited',
   );
 });
+
+test('password login has an independent account and IP rate limit', async () => {
+  const limiter = new MemoryAuthRateLimitAdapter();
+  const now = new Date('2026-09-01T00:00:00.000Z');
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await limiter.consumePasswordLogin({
+      email: 'admin@example.test',
+      clientIp: `198.51.100.${attempt}`,
+      now,
+    });
+  }
+  await assert.rejects(
+    limiter.consumePasswordLogin({ email: 'admin@example.test', clientIp: '198.51.100.99', now }),
+    (error: unknown) =>
+      error instanceof DomainError && error.status === 429 && error.code === 'auth_rate_limited',
+  );
+  await limiter.consumeEmailChallenge({
+    email: 'admin@example.test',
+    clientIp: '198.51.100.99',
+    now,
+  });
+});

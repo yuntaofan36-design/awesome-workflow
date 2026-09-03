@@ -3,7 +3,11 @@ import {
   type CatalogEntry as ContractCatalogEntry,
   type ReleaseChannelName,
 } from '@awesome-workflow/contracts';
-import { WebReleaseManifestSchema, type WebReleaseManifest } from '@awesome-workflow/manifest-schema';
+import {
+  assertFederationWebPolicy,
+  WebReleaseManifestSchema,
+  type WebReleaseManifest,
+} from '@awesome-workflow/manifest-schema';
 
 export type ReleaseChannel = ReleaseChannelName;
 export type WebManifest = WebReleaseManifest;
@@ -44,6 +48,7 @@ function enforceHostPolicy(manifest: WebManifest): void {
   if (manifest.trustTier !== expectedTrustTier) {
     throw new Error(`Catalog entry has an invalid ${manifest.runtime} trust tier`);
   }
+  if (manifest.runtime === 'federation') assertFederationWebPolicy(manifest);
   const cspSources = Object.values(manifest.contentSecurityPolicy).flat();
   if (cspSources.includes('*') || manifest.contentSecurityPolicy.scriptSrc.some(isUnsafeScriptSource)) {
     throw new Error('Catalog entry declares an unsafe content security policy');

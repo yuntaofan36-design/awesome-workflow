@@ -24,12 +24,13 @@ use uuid::Uuid;
 use crate::manifest::HttpMethod;
 use crate::{
     clear_device_registration, load_control_plane_config, persist_device_registration, Agent,
-    AgentError, AgentMethod, AgentResult, AgentSnapshot, AppletManifest, ArtifactAttestation,
-    ArtifactDownloader, Capability, ControlPlaneClient, ControlPlaneConfig, ControlPlaneTransport,
-    DeviceCredential, DeviceCredentialProvider, DeviceEnrollmentPreparation, InstallRequest,
+    AgentError, AgentLocaleSettings, AgentMethod, AgentResult, AgentSnapshot, AppletManifest,
+    ArtifactAttestation, ArtifactDownloader, AuthorizationLeaseVerifier, Capability,
+    ControlPlaneClient, ControlPlaneConfig, ControlPlaneTransport, DeviceCredential,
+    DeviceCredentialProvider, DeviceEnrollmentPreparation, InstallRequest,
     InstallationSyncResponse, InstalledApplet, NativeDeviceCredentialStore, ReportRunStatus,
     ReqwestArtifactDownloader, ReqwestControlPlaneTransport, RpcEnvelope, RunOutcome, RunReport,
-    ScheduleSnapshot, SignatureVerifier, RPC_PROTOCOL_VERSION,
+    RunnerRequest, ScheduleSnapshot, SignatureVerifier, RPC_PROTOCOL_VERSION,
 };
 
 pub const AGENT_PROTOCOL_VERSION: u16 = 1;
@@ -119,6 +120,11 @@ impl AgentEndpoint {
 #[serde(tag = "operation", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum ManagementCommand {
     Snapshot,
+    SetLocale {
+        locale: String,
+        #[serde(default)]
+        fallback_locales: Vec<String>,
+    },
     PrepareDeviceEnrollment,
     CompleteDeviceEnrollment {
         api_base_url: String,
@@ -282,6 +288,16 @@ impl AgentClient {
     pub fn snapshot(&self) -> AgentResult<AgentSnapshot> {
         self.call(ManagementCommand::Snapshot)
     }
+    pub fn set_locale(
+        &self,
+        locale: String,
+        fallback_locales: Vec<String>,
+    ) -> AgentResult<AgentLocaleSettings> {
+        self.call(ManagementCommand::SetLocale {
+            locale,
+            fallback_locales,
+        })
+    }
     pub fn prepare_device_enrollment(&self) -> AgentResult<DeviceEnrollmentPreparation> {
         self.call(ManagementCommand::PrepareDeviceEnrollment)
     }
@@ -380,10 +396,74 @@ impl AgentClient {
     }
 }
 
+pub fn authorize_runner_request(request: &RunnerRequest) -> AgentResult<()> {
+    let name = runner_task_endpoint_name(&request.rpc_endpoint)?;
+    let mut stream = interprocess::local_socket::Stream::connect(name).map_err(|error| {
+        AgentError::AccessDenied(format!("Agent task RPC is unavailable: {error}"))
+    })?;
+    let envelope = RpcEnvelope {
+        protocol_version: request.protocol_version,
+        app_id: request.app_id.clone(),
+        task_id: request.task_id.clone(),
+        lease: request.lease.clone(),
+        method: AgentMethod::RunnerLaunchAuthorize,
+        payload: serde_json::json!({}),
+    };
+    let mut encoded = serde_json::to_vec(&envelope)?;
+    encoded.push(b'\n');
+    stream.write_all(&encoded)?;
+    stream.flush()?;
+    let mut response_line = String::new();
+    BufReader::new(stream)
+        .take(MAX_MESSAGE_BYTES)
+        .read_line(&mut response_line)?;
+    let response: TaskRpcResponse = serde_json::from_str(&response_line).map_err(|error| {
+        AgentError::AccessDenied(format!("Agent task RPC response is invalid: {error}"))
+    })?;
+    if response.protocol_version != RPC_PROTOCOL_VERSION {
+        return Err(AgentError::AccessDenied(
+            "Agent task RPC response uses an unsupported protocol version".into(),
+        ));
+    }
+    if !response.ok {
+        return Err(AgentError::AccessDenied(response.error.unwrap_or_else(
+            || "Runner launch authorization was denied".into(),
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn runner_task_endpoint_name(
+    value: &str,
+) -> AgentResult<interprocess::local_socket::Name<'static>> {
+    let name = value.strip_prefix(r"\\.\pipe\").ok_or_else(|| {
+        AgentError::AccessDenied("Runner task RPC endpoint is not a Windows named pipe".into())
+    })?;
+    name.to_owned()
+        .to_ns_name::<GenericNamespaced>()
+        .map_err(|error| {
+            AgentError::AccessDenied(format!("Runner task RPC endpoint is invalid: {error}"))
+        })
+}
+
+#[cfg(not(windows))]
+fn runner_task_endpoint_name(
+    value: &str,
+) -> AgentResult<interprocess::local_socket::Name<'static>> {
+    value
+        .to_owned()
+        .to_fs_name::<GenericFilePath>()
+        .map_err(|error| {
+            AgentError::AccessDenied(format!("Runner task RPC endpoint is invalid: {error}"))
+        })
+}
+
 pub fn run_agent_daemon(
     endpoint: AgentEndpoint,
     agent: Arc<Agent>,
     verifier: Arc<dyn SignatureVerifier>,
+    authorization_verifier: Arc<dyn AuthorizationLeaseVerifier>,
 ) -> AgentResult<()> {
     let bootstrap_secret = ensure_bootstrap_secret(endpoint.data_root())?;
     #[cfg(not(windows))]
@@ -402,13 +482,22 @@ pub fn run_agent_daemon(
     restrict_socket(&endpoint.task_name)?;
 
     let task_agent = agent.clone();
-    thread::spawn(move || serve_task_connections(task_listener, task_agent));
+    let task_authorization_verifier = authorization_verifier.clone();
+    thread::spawn(move || {
+        serve_task_connections(task_listener, task_agent, task_authorization_verifier)
+    });
 
     let background_agent = agent.clone();
     let background_data_root = endpoint.data_root().to_path_buf();
     let background_verifier = verifier.clone();
+    let background_authorization_verifier = authorization_verifier.clone();
     thread::spawn(move || {
-        run_background_loop(background_data_root, background_agent, background_verifier)
+        run_background_loop(
+            background_data_root,
+            background_agent,
+            background_verifier,
+            background_authorization_verifier,
+        )
     });
 
     for connection in listener.incoming() {
@@ -438,6 +527,7 @@ fn run_background_loop(
     data_root: PathBuf,
     agent: Arc<Agent>,
     verifier: Arc<dyn SignatureVerifier>,
+    authorization_verifier: Arc<dyn AuthorizationLeaseVerifier>,
 ) {
     let transport: Arc<dyn ControlPlaneTransport> = loop {
         match ReqwestControlPlaneTransport::new() {
@@ -462,8 +552,12 @@ fn run_background_loop(
 
     loop {
         let config_result = load_control_plane_config(&data_root);
-        if let Ok(Some(_)) = &config_result {
-            run_due_schedules(&agent);
+        if let Ok(Some(config)) = &config_result {
+            run_due_schedules(
+                &agent,
+                &config.device_id().to_string(),
+                authorization_verifier.as_ref(),
+            );
         }
 
         if last_control_cycle.is_none_or(|last| last.elapsed() >= CONTROL_PLANE_INTERVAL) {
@@ -477,6 +571,7 @@ fn run_background_loop(
                         &client,
                         downloader.as_ref(),
                         verifier.as_ref(),
+                        authorization_verifier.as_ref(),
                     ) {
                         if invalidates_device_registration(&error) {
                             if let Err(clear_error) =
@@ -500,16 +595,33 @@ fn run_background_loop(
     }
 }
 
-fn run_due_schedules(agent: &Agent) {
+fn run_due_schedules(
+    agent: &Agent,
+    device_id: &str,
+    authorization_verifier: &dyn AuthorizationLeaseVerifier,
+) {
     for schedule in agent
-        .claim_due_schedules(crate::now_unix_ms())
+        .claim_authorized_due_schedules(crate::now_unix_ms(), device_id, authorization_verifier)
         .unwrap_or_default()
     {
+        let Some(authorization_lease) = schedule.authorization_lease.clone() else {
+            continue;
+        };
         let requires_foreground = agent
             .run_requires_foreground(&schedule.app_id, schedule.version.as_deref())
             .unwrap_or(true);
         if !requires_foreground {
-            let _ = agent.run(&schedule.app_id, schedule.version.as_deref(), schedule.args);
+            let _ = agent.run_server_authorized(
+                &schedule.app_id,
+                schedule.version.as_deref(),
+                schedule.args,
+                &authorization_lease,
+                device_id,
+                crate::AuthorizationTaskKind::Schedule,
+                &schedule.schedule_id,
+                schedule.revision,
+                authorization_verifier,
+            );
         }
     }
 }
@@ -519,6 +631,7 @@ fn run_control_plane_cycle(
     client: &ControlPlaneClient,
     downloader: &dyn ArtifactDownloader,
     verifier: &dyn SignatureVerifier,
+    authorization_verifier: &dyn AuthorizationLeaseVerifier,
 ) -> AgentResult<()> {
     let mut first_error = None;
 
@@ -548,7 +661,10 @@ fn run_control_plane_cycle(
         let _ = capture_cycle_result(agent.apply_run_controls(&controls), &mut first_error)?;
     }
     let _ = capture_cycle_result(enqueue_completed_run_reports(agent), &mut first_error)?;
-    let _ = capture_cycle_result(process_pending_remote_runs(agent), &mut first_error)?;
+    let _ = capture_cycle_result(
+        process_pending_remote_runs(agent, &client.device_id(), authorization_verifier),
+        &mut first_error,
+    )?;
 
     let outbox_flushed =
         capture_cycle_result(flush_run_report_outbox(agent, client), &mut first_error)?
@@ -558,13 +674,26 @@ fn run_control_plane_cycle(
             capture_cycle_result(client.claim_runs(RUN_CLAIM_LIMIT), &mut first_error)?
         {
             for claim in claims {
-                let _ = capture_cycle_result(agent.record_remote_claim(&claim), &mut first_error)?;
+                let _ = capture_cycle_result(
+                    agent.record_authorized_remote_claim(
+                        &claim,
+                        &client.device_id(),
+                        authorization_verifier,
+                    ),
+                    &mut first_error,
+                )?;
             }
         }
-        let _ = capture_cycle_result(process_pending_remote_runs(agent), &mut first_error)?;
+        let _ = capture_cycle_result(
+            process_pending_remote_runs(agent, &client.device_id(), authorization_verifier),
+            &mut first_error,
+        )?;
         let _ = capture_cycle_result(flush_run_report_outbox(agent, client), &mut first_error)?;
     }
-    let _ = capture_cycle_result(client.sync_agent_schedules(agent), &mut first_error)?;
+    let _ = capture_cycle_result(
+        client.sync_agent_schedules(agent, authorization_verifier),
+        &mut first_error,
+    )?;
 
     match first_error {
         Some(error) => Err(error),
@@ -588,8 +717,12 @@ fn capture_cycle_result<T>(
     }
 }
 
-fn process_pending_remote_runs(agent: &Agent) -> AgentResult<()> {
-    for remote in agent.pending_remote_runs()? {
+fn process_pending_remote_runs(
+    agent: &Agent,
+    device_id: &str,
+    authorization_verifier: &dyn AuthorizationLeaseVerifier,
+) -> AgentResult<()> {
+    for remote in agent.pending_authorized_remote_runs(device_id, authorization_verifier)? {
         if remote.requires_elevation {
             agent.enqueue_run_report(
                 &remote.run_id,
@@ -631,7 +764,20 @@ fn process_pending_remote_runs(agent: &Agent) -> AgentResult<()> {
             }
         }
 
-        match agent.run(&remote.app_id, Some(&remote.version), remote.args) {
+        let Some(authorization_lease) = remote.authorization_lease.as_ref() else {
+            continue;
+        };
+        match agent.run_server_authorized(
+            &remote.app_id,
+            Some(&remote.version),
+            remote.args.clone(),
+            authorization_lease,
+            device_id,
+            crate::AuthorizationTaskKind::Run,
+            &remote.run_id,
+            remote.attempt,
+            authorization_verifier,
+        ) {
             Ok(RunOutcome::Process { task, .. }) => {
                 if let Err(error) = agent.bind_remote_task_and_enqueue_running(
                     &remote.run_id,
@@ -747,13 +893,22 @@ fn invalidates_device_registration(error: &AgentError) -> bool {
     )
 }
 
-fn serve_task_connections(listener: interprocess::local_socket::Listener, agent: Arc<Agent>) {
+fn serve_task_connections(
+    listener: interprocess::local_socket::Listener,
+    agent: Arc<Agent>,
+    authorization_verifier: Arc<dyn AuthorizationLeaseVerifier>,
+) {
     for connection in listener.incoming() {
         match connection {
             Ok(connection) => {
                 let connection_agent = agent.clone();
+                let connection_authorization_verifier = authorization_verifier.clone();
                 thread::spawn(move || {
-                    if let Err(error) = handle_task_connection(connection, &connection_agent) {
+                    if let Err(error) = handle_task_connection(
+                        connection,
+                        &connection_agent,
+                        connection_authorization_verifier.as_ref(),
+                    ) {
                         eprintln!("task RPC request rejected: {error}");
                     }
                 });
@@ -766,6 +921,7 @@ fn serve_task_connections(listener: interprocess::local_socket::Listener, agent:
 fn handle_task_connection(
     mut stream: interprocess::local_socket::Stream,
     agent: &Agent,
+    authorization_verifier: &dyn AuthorizationLeaseVerifier,
 ) -> AgentResult<()> {
     set_stream_timeouts(&stream)?;
     let mut request_line = String::new();
@@ -773,7 +929,9 @@ fn handle_task_connection(
         .take(MAX_MESSAGE_BYTES)
         .read_line(&mut request_line)?;
     let response = match serde_json::from_str::<RpcEnvelope<serde_json::Value>>(&request_line) {
-        Ok(request) => dispatch_task_rpc(request, agent),
+        Ok(request) => {
+            dispatch_task_rpc_with_authorization(request, agent, None, authorization_verifier)
+        }
         Err(error) => task_error(AgentError::AccessDenied(format!(
             "invalid task RPC envelope: {error}"
         ))),
@@ -785,22 +943,53 @@ fn handle_task_connection(
     Ok(())
 }
 
-pub(crate) fn dispatch_task_rpc(
-    request: RpcEnvelope<serde_json::Value>,
-    agent: &Agent,
-) -> TaskRpcResponse {
-    dispatch_task_rpc_with_arguments(request, agent, None)
-}
-
 pub(crate) fn dispatch_task_rpc_with_arguments(
     request: RpcEnvelope<serde_json::Value>,
     agent: &Agent,
     arguments: Option<&[String]>,
 ) -> TaskRpcResponse {
+    dispatch_task_rpc_with_authorization(
+        request,
+        agent,
+        arguments,
+        &crate::RejectAuthorizationLeases,
+    )
+}
+
+fn dispatch_task_rpc_with_authorization(
+    request: RpcEnvelope<serde_json::Value>,
+    agent: &Agent,
+    arguments: Option<&[String]>,
+    authorization_verifier: &dyn AuthorizationLeaseVerifier,
+) -> TaskRpcResponse {
     let result = agent.rpc_capabilities(&request).and_then(|capabilities| {
         let app_id = request.app_id;
         let task_id = request.task_id;
         match request.method {
+            AgentMethod::RunnerLaunchAuthorize => {
+                let payload = request.payload.as_object().ok_or_else(|| {
+                    AgentError::AccessDenied(
+                        "runner-launch-authorize payload must be an object".into(),
+                    )
+                })?;
+                if !payload.is_empty() {
+                    return Err(AgentError::AccessDenied(
+                        "runner-launch-authorize payload must be empty".into(),
+                    ));
+                }
+                agent.authorize_runner_launch(
+                    &RpcEnvelope {
+                        protocol_version: request.protocol_version,
+                        app_id,
+                        task_id,
+                        lease: request.lease,
+                        method: AgentMethod::RunnerLaunchAuthorize,
+                        payload: (),
+                    },
+                    authorization_verifier,
+                )?;
+                Ok(serde_json::Value::Null)
+            }
             AgentMethod::ContextRead => {
                 let payload = request.payload.as_object().ok_or_else(|| {
                     AgentError::AccessDenied("context-read payload must be an object".into())
@@ -1469,6 +1658,10 @@ fn dispatch(
         authorize_management_request(&request, expected_secret).and_then(|_| {
             match request.command {
                 ManagementCommand::Snapshot => to_value(agent.snapshot()),
+                ManagementCommand::SetLocale {
+                    locale,
+                    fallback_locales,
+                } => to_value(agent.set_locale(locale, fallback_locales)),
                 ManagementCommand::PrepareDeviceEnrollment => {
                     to_value(agent.prepare_device_enrollment())
                 }
@@ -1735,7 +1928,13 @@ mod tests {
             .unwrap(),
         );
         thread::spawn(move || {
-            run_agent_daemon(endpoint, agent, Arc::new(crate::RejectUnsignedVerifier)).unwrap()
+            run_agent_daemon(
+                endpoint,
+                agent,
+                Arc::new(crate::RejectUnsignedVerifier),
+                Arc::new(crate::RejectAuthorizationLeases),
+            )
+            .unwrap()
         });
 
         let mut snapshot = None;
@@ -1784,6 +1983,8 @@ mod tests {
             kind: ManifestKind::Desktop,
             name: "RPC Test".into(),
             description: String::new(),
+            default_locale: "en-US".into(),
+            localizations: Default::default(),
             runtimes: vec![RuntimeSpec {
                 platform: TargetPlatform::WINDOWS_X64,
                 artifact: "windows-runtime".into(),
@@ -1841,6 +2042,7 @@ mod tests {
                 daemon_endpoint,
                 daemon_agent,
                 Arc::new(crate::RejectUnsignedVerifier),
+                Arc::new(crate::RejectAuthorizationLeases),
             )
             .unwrap()
         });

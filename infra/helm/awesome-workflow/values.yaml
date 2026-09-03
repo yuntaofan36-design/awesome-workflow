@@ -24,6 +24,8 @@ config:
     smtpFrom: no-reply@workflow.example.com
     emailWebhookUrl: ''
     bootstrapAdminEmails: ''
+    authorizationLeaseSigningKeyId: replace-me
+    authorizationLeaseTtlSeconds: 900
     validationQueueMode: redis
     objectStorageMode: s3
     artifactUploadBaseUrl: https://artifacts.workflow.example.com/awesome-workflow-artifacts

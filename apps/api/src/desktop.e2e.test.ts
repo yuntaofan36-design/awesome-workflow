@@ -5,11 +5,13 @@ import { loadPlatformConfig } from '@awesome-workflow/config';
 import {
   computeArtifactSetIntegritySha256,
   computeDesktopCapabilityHash,
+  DesktopReleaseManifestSchema,
 } from '@awesome-workflow/manifest-schema';
 
 import { createApiApplication } from './bootstrap.js';
 
 const sha256 = 'a'.repeat(64);
+const authorizationLeaseSeed = Buffer.alloc(32, 7).toString('base64');
 const signature = {
   algorithm: 'ed25519' as const,
   keyId: 'desktop-e2e-publisher-key',
@@ -33,6 +35,9 @@ test('desktop API enforces device ownership and drives install, schedule and run
     WORKER_CALLBACK_TOKEN: 'desktop-e2e-worker-token-at-least-32-characters',
     BOOTSTRAP_ADMIN_EMAILS: 'desktop-owner@example.test',
     ARTIFACT_UPLOAD_BASE_URL: 'https://artifacts.example.test/bucket',
+    AUTHORIZATION_LEASE_SIGNING_KEY_ID: 'desktop-e2e-authorization-key',
+    AUTHORIZATION_LEASE_SIGNING_PRIVATE_KEY: authorizationLeaseSeed,
+    AUTHORIZATION_LEASE_TTL_SECONDS: '300',
   });
   const app = await createApiApplication(config);
   context.after(() => app.close());
@@ -156,6 +161,7 @@ test('desktop API enforces device ownership and drives install, schedule and run
     runMode: 'serial' as const,
     minHostVersion: '1.0.0',
   };
+  const normalizedManifest = DesktopReleaseManifestSchema.parse(manifest);
   const releaseResponse = await server.inject({
     method: 'POST',
     url: `/api/v1/applications/${application.id}/releases`,
@@ -409,7 +415,7 @@ test('desktop API enforces device ownership and drives install, schedule and run
         status: string;
         appId: string;
         version: string;
-        manifest: typeof manifest;
+        manifest: typeof normalizedManifest;
         artifact: {
           size: number;
           sha256: string;
@@ -427,7 +433,7 @@ test('desktop API enforces device ownership and drives install, schedule and run
     status: 'requested',
     appId: application.slug,
     version: release.version,
-    manifest,
+    manifest: normalizedManifest,
     artifact: {
       name: artifactDeclaration.name,
       fileName: artifactDeclaration.fileName,
@@ -501,6 +507,14 @@ test('desktop API enforces device ownership and drives install, schedule and run
   assert.equal(snapshotResponse.statusCode, 200, snapshotResponse.body);
   assert.equal(snapshotResponse.json().data.kind, 'snapshot');
   assert.deepEqual(snapshotResponse.json().data.snapshot.schedules[0].args, ['--scheduled']);
+  assert.equal(
+    snapshotResponse.json().data.snapshot.schedules[0].authorizationLease.claims.task.id,
+    schedule.id,
+  );
+  assert.equal(
+    snapshotResponse.json().data.snapshot.schedules[0].authorizationLease.claims.deviceId,
+    device.id,
+  );
 
   const updateScheduleResponse = await server.inject({
     method: 'PATCH',
@@ -545,14 +559,28 @@ test('desktop API enforces device ownership and drives install, schedule and run
     payload: { limit: 1 },
   });
   assert.equal(claimResponse.statusCode, 200, claimResponse.body);
-  assert.deepEqual(claimResponse.json().data[0], {
-    runId: run.id,
-    attempt: 1,
-    appId: 'desktop-e2e-runner',
-    version: '1.2.3',
-    args: ['--manual'],
-    requiresElevation: true,
-  });
+  const claimedRun = claimResponse.json().data[0];
+  assert.deepEqual(
+    {
+      runId: claimedRun.runId,
+      attempt: claimedRun.attempt,
+      appId: claimedRun.appId,
+      version: claimedRun.version,
+      args: claimedRun.args,
+      requiresElevation: claimedRun.requiresElevation,
+    },
+    {
+      runId: run.id,
+      attempt: 1,
+      appId: 'desktop-e2e-runner',
+      version: '1.2.3',
+      args: ['--manual'],
+      requiresElevation: true,
+    },
+  );
+  assert.equal(claimedRun.authorizationLease.claims.task.id, run.id);
+  assert.equal(claimedRun.authorizationLease.claims.task.kind, 'run');
+  assert.equal(claimedRun.authorizationLease.claims.revision, 1);
 
   for (const report of [
     { status: 'needs_user_approval', errorCode: 'elevation_required' },

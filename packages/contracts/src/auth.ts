@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { PlatformRoleSchema } from './workspace.js';
+import { SupportedLocaleSchema } from './locale.js';
 
 export const EmailAddressSchema = z.string().trim().toLowerCase().email().max(254);
 export const InternalReturnPathSchema = z
@@ -12,15 +13,25 @@ export const InternalReturnPathSchema = z
     'returnTo must be a same-origin absolute path',
   );
 
-export const AuthProviderIdSchema = z.enum(['email', 'google', 'feishu', 'wechat']);
+export const SocialAuthProviderIdSchema = z.enum(['google', 'feishu', 'wechat']);
+export type SocialAuthProviderId = z.infer<typeof SocialAuthProviderIdSchema>;
+
+export const AuthProviderIdSchema = z.enum(['email', 'password', 'google', 'feishu', 'wechat']);
 export type AuthProviderId = z.infer<typeof AuthProviderIdSchema>;
 
 export const AuthProviderSchema = z.object({
   id: AuthProviderIdSchema,
   label: z.string().min(1),
-  protocol: z.enum(['email_otp', 'oidc']),
+  labelKey: z.enum([
+    'auth.provider.email',
+    'auth.provider.password',
+    'auth.provider.google',
+    'auth.provider.feishu',
+    'auth.provider.wechat',
+  ]),
+  protocol: z.enum(['email_otp', 'password', 'oidc']),
   status: z.enum(['active', 'configured', 'disabled']),
-  strategy: z.enum(['local_email_otp', 'oidc_broker']).optional(),
+  strategy: z.enum(['local_email_otp', 'local_password', 'oidc_broker']).optional(),
   authorizeUrl: z.string().url().optional(),
 });
 export type AuthProvider = z.infer<typeof AuthProviderSchema>;
@@ -58,6 +69,12 @@ export const VerifyEmailChallengeInputSchema = z.object({
 });
 export type VerifyEmailChallengeInput = z.infer<typeof VerifyEmailChallengeInputSchema>;
 
+export const PasswordLoginInputSchema = z.object({
+  email: EmailAddressSchema,
+  password: z.string().min(1).max(1024),
+});
+export type PasswordLoginInput = z.infer<typeof PasswordLoginInputSchema>;
+
 export const AuthSessionResultSchema = z.object({
   accessToken: z.string().min(32),
   expiresAt: z.string().datetime(),
@@ -69,8 +86,9 @@ export const DESKTOP_PUBLIC_CLIENT_ID = 'awesome-workflow-desktop' as const;
 export const DESKTOP_OFFLINE_SCOPE = 'openid profile email offline_access' as const;
 
 export const OidcAuthorizationInputSchema = z.object({
-  provider: AuthProviderIdSchema.exclude(['email']).optional(),
+  provider: SocialAuthProviderIdSchema.optional(),
   returnTo: InternalReturnPathSchema.optional(),
+  uiLocales: SupportedLocaleSchema.optional(),
 });
 export type OidcAuthorizationInput = z.infer<typeof OidcAuthorizationInputSchema>;
 
@@ -109,6 +127,7 @@ export const CliAuthorizationInputSchema = z.object({
   codeChallenge: PkceValueSchema,
   codeChallengeMethod: z.literal('S256'),
   scope: z.literal(DESKTOP_OFFLINE_SCOPE).optional(),
+  locale: SupportedLocaleSchema.optional(),
   state: z
     .string()
     .min(32)

@@ -2,6 +2,12 @@ import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 
 import type { AgentSnapshot, AppletManifest, EnrolledDevice, RunAppletResult } from '@/types';
+import { getDesktopRequestLocale } from '../i18n/requestLocale';
+
+export type AgentLocaleSettings = {
+  locale: 'en-US' | 'zh-CN';
+  fallbackLocales: Array<'en-US' | 'zh-CN'>;
+};
 
 const browserSnapshot: AgentSnapshot = {
   developerMode: true,
@@ -20,6 +26,13 @@ const browserSnapshot: AgentSnapshot = {
         name: 'Hello Runner',
         version: '0.1.0',
         description: 'Reference Python applet using a scoped runner lease.',
+        defaultLocale: 'en-US',
+        localizations: {
+          'zh-CN': {
+            name: '你好 Runner',
+            description: '使用受限 Runner 租约的 Python 参考微应用。',
+          },
+        },
         artifacts: [
           {
             name: 'windows-runtime',
@@ -77,9 +90,18 @@ export function isTauriRuntime() {
 export const desktopHost = {
   snapshot: async () =>
     isTauriRuntime() ? invoke<AgentSnapshot>('agent_snapshot') : structuredClone(browserSnapshot),
+  setLocale: (
+    locale: AgentLocaleSettings['locale'],
+    fallbackLocales: AgentLocaleSettings['fallbackLocales'],
+  ) =>
+    isTauriRuntime()
+      ? invoke<AgentLocaleSettings>('agent_set_locale', { input: { locale, fallbackLocales } })
+      : Promise.resolve<AgentLocaleSettings>({ locale, fallbackLocales }),
   enrollDevice: (workspaceId: string, name: string) =>
     isTauriRuntime()
-      ? invoke<EnrolledDevice>('desktop_device_enroll', { input: { workspaceId, name } })
+      ? invoke<EnrolledDevice>('desktop_device_enroll', {
+          input: { workspaceId, name, locale: getDesktopRequestLocale() },
+        })
       : Promise.resolve<EnrolledDevice>({
           deviceId: browserSnapshot.device!.deviceId,
           name,
@@ -114,18 +136,18 @@ export const desktopHost = {
     isTauriRuntime()
       ? invoke<string>('read_task_log', { taskId })
       : Promise.resolve('[runner] starting hello-runner\nprogress 100%\n[runner] exit status 0'),
-  chooseDirectory: async () => {
+  chooseDirectory: async (title: string) => {
     if (!isTauriRuntime()) return 'C:\\dev\\hello-runner';
-    const selected = await open({ directory: true, multiple: false, title: 'Choose an applet directory' });
+    const selected = await open({ directory: true, multiple: false, title });
     return selected ?? null;
   },
-  choosePackage: async () => {
+  choosePackage: async (title: string, filterName: string) => {
     if (!isTauriRuntime()) return 'C:\\dist\\hello-runner-0.1.0.awpkg';
     const selected = await open({
       directory: false,
       multiple: false,
-      title: 'Choose a signed .awpkg',
-      filters: [{ name: 'Awesome Workflow package', extensions: ['awpkg'] }],
+      title,
+      filters: [{ name: filterName, extensions: ['awpkg'] }],
     });
     return selected ?? null;
   },

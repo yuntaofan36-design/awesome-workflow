@@ -6,6 +6,7 @@ import {
   CliRefreshTokenInputSchema,
   CliTokenInputSchema,
   OidcAuthorizationInputSchema,
+  PasswordLoginInputSchema,
   StartEmailChallengeInputSchema,
   VerifyEmailChallengeInputSchema,
   WorkloadTokenExchangeInputSchema,
@@ -20,6 +21,7 @@ import { Public } from '../../http/public.decorator.js';
 import { ZodPipe } from '../../http/zod.pipe.js';
 import { bearerToken, cookieToken } from '../../http/session.guard.js';
 import { AuthService } from './auth.service.js';
+import { negotiateLocale } from '../../i18n/locale.js';
 
 const OidcCallbackSchema = z.object({ code: z.string().min(1), state: z.string().min(1) });
 const CliApprovalQuerySchema = z.object({ requestId: z.string().uuid() });
@@ -40,13 +42,32 @@ export class AuthController {
   }
 
   @Public()
+  @Post('password/login')
+  @HttpCode(200)
+  async loginPassword(
+    @Body(new ZodPipe(PasswordLoginInputSchema)) input: z.infer<typeof PasswordLoginInputSchema>,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    const session = await this.auth.loginPassword(input.email, input.password, request.ip);
+    this.writeSessionCookie(reply, session.accessToken, session.expiresAt);
+    return { data: session.user };
+  }
+
+  @Public()
   @Post('email/challenges')
   @HttpCode(200)
   async requestEmailCode(
     @Body(new ZodPipe(StartEmailChallengeInputSchema)) input: z.infer<typeof StartEmailChallengeInputSchema>,
     @Req() request: FastifyRequest,
   ) {
-    return { data: await this.auth.requestEmailCode(input.email, request.ip) };
+    return {
+      data: await this.auth.requestEmailCode(
+        input.email,
+        request.ip,
+        negotiateLocale(request.headers['accept-language']),
+      ),
+    };
   }
 
   @Public()
@@ -66,8 +87,14 @@ export class AuthController {
   @Get('oidc/start')
   async beginOidc(
     @Query(new ZodPipe(OidcAuthorizationInputSchema)) input: z.infer<typeof OidcAuthorizationInputSchema>,
+    @Req() request: FastifyRequest,
   ) {
-    return { data: await this.auth.beginOidc(input) };
+    return {
+      data: await this.auth.beginOidc({
+        ...input,
+        uiLocales: input.uiLocales ?? negotiateLocale(request.headers['accept-language']),
+      }),
+    };
   }
 
   @Public()

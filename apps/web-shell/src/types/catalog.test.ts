@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { parseCatalogResponse } from './catalog';
+import { localizeCatalog } from '../services/catalog';
 
 const iframeEntry = {
   applicationId: '00000000-0000-4000-8000-000000000101',
@@ -26,6 +27,9 @@ const iframeEntry = {
   },
   name: 'Demo',
   kind: 'web',
+  localizations: {
+    'zh-CN': { name: '演示应用', summary: '本地化摘要' },
+  },
   promotedAt: '2026-09-01T00:00:00.000Z',
   releaseId: '00000000-0000-4000-8000-000000000201',
   slug: 'demo',
@@ -35,6 +39,26 @@ const iframeEntry = {
 };
 
 describe('catalog parser', () => {
+  it('resolves publisher-authored catalog content with canonical fallback', () => {
+    const parsed = parseCatalogResponse({ data: [iframeEntry] });
+    expect(
+      localizeCatalog(parsed, {
+        direction: 'ltr',
+        fallbackLocales: ['en-US'],
+        locale: 'zh-CN',
+        timeZone: 'Asia/Shanghai',
+      })[0],
+    ).toMatchObject({ name: '演示应用', summary: '本地化摘要' });
+    expect(
+      localizeCatalog(parsed, {
+        direction: 'ltr',
+        fallbackLocales: [],
+        locale: 'en-US',
+        timeZone: 'UTC',
+      })[0],
+    ).toMatchObject({ name: 'Demo', summary: 'Demo app' });
+  });
+
   it('accepts a separately-originated iframe manifest', () => {
     expect(parseCatalogResponse({ data: [iframeEntry] })[0]?.manifest.runtime).toBe('iframe');
   });

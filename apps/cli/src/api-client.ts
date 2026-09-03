@@ -1,4 +1,5 @@
 import { CliError, SecretRedactor, isRecord } from './safety.js';
+import { cliText, getCliLocale, problemText } from './i18n.js';
 
 export type FetchLike = typeof fetch;
 
@@ -6,6 +7,7 @@ export class ApiHttpError extends CliError {
   constructor(
     readonly status: number,
     message: string,
+    readonly code?: string,
   ) {
     super(message);
     this.name = 'ApiHttpError';
@@ -26,7 +28,10 @@ export class ApiClient {
   }
 
   async request<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
-    const headers = new Headers({ accept: 'application/json' });
+    const headers = new Headers({
+      accept: 'application/json',
+      'accept-language': getCliLocale(),
+    });
     if (this.accessToken) headers.set('authorization', `Bearer ${this.accessToken}`);
     if (body !== undefined) headers.set('content-type', 'application/json');
 
@@ -42,29 +47,32 @@ export class ApiClient {
         signal: AbortSignal.timeout(30_000),
       });
     } catch (error) {
-      throw new CliError(`API request failed: ${this.redactor.clean(error)}`);
+      throw new CliError(cliText('api.request', { detail: this.redactor.clean(error) }));
     }
 
     const payload = await readJson(response);
     if (!response.ok) {
-      const detail = problemMessage(payload);
+      const problem = problemDescriptor(payload);
+      const detail = problemText(problem.code ?? '', problem.message);
       throw new ApiHttpError(
         response.status,
-        this.redactor.clean(`API request failed with HTTP ${response.status}${detail ? `: ${detail}` : ''}`),
+        this.redactor.clean(
+          cliText('api.http', { status: response.status, detail: detail ? `: ${detail}` : '' }),
+        ),
+        problem.code,
       );
     }
     if (!isRecord(payload) || !Object.hasOwn(payload, 'data')) {
-      throw new CliError('API returned an invalid success envelope.');
+      throw new CliError(cliText('api.envelope'));
     }
     return payload.data as T;
   }
 
-  async upload(
-    target: UploadTarget,
-    bytes: Uint8Array,
-    label: 'artifact' | 'SBOM',
-  ): Promise<string | undefined> {
+  async upload(target: UploadTarget, bytes: Uint8Array, label: string): Promise<string | undefined> {
     const headers = new Headers(target.headers);
+    // Presigned object-storage requests are a separate trust/audience boundary.
+    // Locale negotiation belongs only on the Awesome Workflow platform API.
+    headers.delete('accept-language');
     let response: Response;
     try {
       response = await this.fetchImpl(target.url, {
@@ -77,10 +85,10 @@ export class ApiClient {
         signal: AbortSignal.timeout(120_000),
       });
     } catch (error) {
-      throw new CliError(`${label} upload failed: ${this.redactor.clean(error)}`);
+      throw new CliError(cliText('upload.failed', { label, detail: this.redactor.clean(error) }));
     }
     if (!response.ok)
-      throw new ApiHttpError(response.status, `${label} upload failed with HTTP ${response.status}.`);
+      throw new ApiHttpError(response.status, cliText('upload.http', { label, status: response.status }));
     return response.headers.get('etag') ?? undefined;
   }
 }
@@ -97,12 +105,10 @@ export function normalizeApiBase(value: string): string {
   try {
     url = new URL(value);
   } catch {
-    throw new CliError('API base URL must be an absolute HTTP(S) URL.');
+    throw new CliError(cliText('api.baseAbsolute'));
   }
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
-    throw new CliError(
-      'API base URL must be an HTTP(S) origin or path without credentials, query, or fragment.',
-    );
+    throw new CliError(cliText('api.baseSafe'));
   }
   const cleanPath = url.pathname.replace(/\/+$/, '');
   url.pathname = cleanPath.endsWith('/api/v1') ? cleanPath : `${cleanPath}/api/v1`.replace(/\/{2,}/g, '/');
@@ -120,18 +126,19 @@ async function readJson(response: Response): Promise<unknown> {
   }
 }
 
-function problemMessage(payload: unknown): string | undefined {
-  if (!isRecord(payload)) return undefined;
-  for (const key of ['detail', 'message', 'title', 'code']) {
+function problemDescriptor(payload: unknown): { code?: string; message?: string } {
+  if (!isRecord(payload)) return {};
+  const code = typeof payload.code === 'string' ? payload.code : undefined;
+  for (const key of ['detail', 'message', 'title']) {
     const value = payload[key];
-    if (typeof value === 'string' && value) return value;
+    if (typeof value === 'string' && value) return { code, message: value };
   }
-  return undefined;
+  return { code };
 }
 
 function trimApiPath(path: string): string {
   if (!path.startsWith('/') || path.startsWith('//') || path.includes('\\')) {
-    throw new CliError('API paths must be same-origin absolute paths.');
+    throw new CliError(cliText('api.path'));
   }
   return path.slice(1);
 }

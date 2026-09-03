@@ -12,7 +12,13 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 
-import type { SbomDescriptor, ScheduleRecord, ValidationEvidence } from '@awesome-workflow/contracts';
+import type {
+  ApplicationLocalizations,
+  SbomDescriptor,
+  ScheduleRecordIntent,
+  SupportedLocale,
+  ValidationEvidence,
+} from '@awesome-workflow/contracts';
 import type {
   DesktopCapability,
   PublisherSignature,
@@ -259,6 +265,8 @@ export const applications = pgTable(
     slug: text('slug').notNull(),
     name: text('name').notNull(),
     summary: text('summary').notNull(),
+    defaultLocale: text('default_locale').$type<SupportedLocale>().notNull().default('en-US'),
+    localizations: jsonb('localizations').$type<ApplicationLocalizations>().notNull().default({}),
     kind: applicationKindEnum('kind').notNull(),
     createdBy: uuid('created_by')
       .notNull()
@@ -430,7 +438,7 @@ export const scheduleChanges = pgTable(
       .references(() => schedules.id, { onDelete: 'cascade' }),
     targetDeviceId: uuid('target_device_id').references(() => devices.id, { onDelete: 'cascade' }),
     operation: scheduleChangeOperationEnum('operation').notNull(),
-    record: jsonb('record').$type<ScheduleRecord>(),
+    record: jsonb('record').$type<ScheduleRecordIntent>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

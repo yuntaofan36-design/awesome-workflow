@@ -7,6 +7,7 @@ import {
   Input,
   Modal,
   Popconfirm,
+  Select,
   Skeleton,
   Space,
   Table,
@@ -22,9 +23,12 @@ import {
 } from '@arco-design/web-react/icon';
 import type {
   Application,
+  ApplicationLocalizations,
+  LocalePreference,
   ReleaseListItem,
   ReleaseStatus,
   ReleaseStatusView,
+  SupportedLocale,
 } from '@awesome-workflow/contracts';
 import { MetricCard, SectionIntro, SignalBadge } from '@awesome-workflow/ui';
 import type { HostApi, ThemeSnapshot, UserSummary, WorkspaceSummary } from '@awesome-workflow/web-sdk';
@@ -42,6 +46,7 @@ import {
   reviewRelease,
 } from './api';
 import type { CatalogEntry, ReleaseChannel, WebManifest } from './domain';
+import { useControlPlaneI18n } from './i18n';
 
 const CHANNELS = ['dev', 'canary', 'stable'] as const;
 
@@ -49,6 +54,7 @@ type Identity = { theme: ThemeSnapshot; user: UserSummary; workspace: WorkspaceS
 type CatalogMatrix = Record<ReleaseChannel, CatalogEntry[]>;
 
 export function ControlPlaneApp({ host, initialPath }: { host: HostApi; initialPath: string }) {
+  const { t, translateError } = useControlPlaneI18n();
   const identity = useQuery({
     queryKey: ['host', 'identity'],
     queryFn: async (): Promise<Identity> => {
@@ -71,7 +77,11 @@ export function ControlPlaneApp({ host, initialPath }: { host: HostApi; initialP
   if (identity.isError) {
     return (
       <div className="cp-fatal">
-        <Alert type="error" title="Host context unavailable" content={identity.error.message} />
+        <Alert
+          type="error"
+          title={t('errors.hostContextUnavailable')}
+          content={translateError(identity.error)}
+        />
       </div>
     );
   }
@@ -87,20 +97,22 @@ export function ControlPlaneApp({ host, initialPath }: { host: HostApi; initialP
 }
 
 function ControlPlaneBoot() {
+  const { t } = useControlPlaneI18n();
   return (
     <div className="cp-boot">
-      <span>CONTROL PLANE / HANDSHAKE</span>
+      <span>{t('app.handshake')}</span>
       <Skeleton animation text={{ rows: 4, width: ['36%', '72%', '58%', '44%'] }} />
     </div>
   );
 }
 
 function ControlPlaneFrame({ host, identity }: { host: HostApi; identity: Identity }) {
+  const { locale, standaloneLocale, t, translateError } = useControlPlaneI18n();
   const location = useLocation();
   const queries = useQueries({
     queries: CHANNELS.map((channel) => ({
-      queryKey: ['catalog', identity.workspace.id, channel],
-      queryFn: () => listCatalog(identity.workspace.id, channel),
+      queryKey: ['catalog', identity.workspace.id, channel, locale.locale],
+      queryFn: () => listCatalog(identity.workspace.id, channel, locale.locale),
     })),
   });
   const queryClient = useQueryClient();
@@ -131,14 +143,14 @@ function ControlPlaneFrame({ host, identity }: { host: HostApi; identity: Identi
   return (
     <div className="cp-frame">
       <aside className="cp-rail">
-        <div className="cp-rail__label">OPERATE</div>
-        <ControlNavLink icon={<IconApps />} label="Applications" to="/applications" />
-        <ControlNavLink icon={<IconBranch />} label="Releases" to="/releases" />
-        <ControlNavLink icon={<IconExperiment />} label="Channels" to="/channels" />
-        <ControlNavLink icon={<IconCheckCircle />} label="Approvals" to="/approvals" />
+        <div className="cp-rail__label">{t('navigation.operate')}</div>
+        <ControlNavLink icon={<IconApps />} label={t('navigation.applications')} to="/applications" />
+        <ControlNavLink icon={<IconBranch />} label={t('navigation.releases')} to="/releases" />
+        <ControlNavLink icon={<IconExperiment />} label={t('navigation.channels')} to="/channels" />
+        <ControlNavLink icon={<IconCheckCircle />} label={t('navigation.approvals')} to="/approvals" />
         <div className="cp-rail__footer">
           <SignalBadge tone={error ? 'danger' : isPending ? 'warning' : 'success'}>
-            {error ? 'sync fault' : isPending ? 'syncing' : 'live catalog'}
+            {error ? t('sync.fault') : isPending ? t('sync.syncing') : t('sync.live')}
           </SignalBadge>
         </div>
       </aside>
@@ -146,18 +158,31 @@ function ControlPlaneFrame({ host, identity }: { host: HostApi; identity: Identi
       <main className="cp-main">
         <header className="cp-topbar">
           <div>
-            <span>WORKSPACE</span>
+            <span>{t('header.workspace')}</span>
             <strong>{identity.workspace.name}</strong>
           </div>
           <Space size="medium">
+            {standaloneLocale && (
+              <Select
+                aria-label={t('locale.label')}
+                className="cp-locale-select"
+                onChange={(value) => standaloneLocale.setPreference(value as LocalePreference)}
+                options={[
+                  { label: t('locale.system'), value: 'system' },
+                  { label: t('locale.enUS'), value: 'en-US' },
+                  { label: t('locale.zhCN'), value: 'zh-CN' },
+                ]}
+                value={standaloneLocale.preference}
+              />
+            )}
             <Button type="text" icon={<IconRefresh />} onClick={() => void refresh()}>
-              Refresh
+              {t('header.refresh')}
             </Button>
             <div className="cp-user">
               <Avatar size={30}>{identity.user.displayName.slice(0, 1).toUpperCase()}</Avatar>
               <span>
                 <strong>{identity.user.displayName}</strong>
-                <small>{identity.workspace.role}</small>
+                <small>{t(`enums.role.${identity.workspace.role}`)}</small>
               </span>
             </div>
           </Space>
@@ -167,8 +192,8 @@ function ControlPlaneFrame({ host, identity }: { host: HostApi; identity: Identi
           <Alert
             className="cp-alert"
             type="error"
-            title="Catalog synchronization failed"
-            content={error.message}
+            title={t('errors.catalogSyncFailed')}
+            content={translateError(error)}
           />
         )}
         <div className="cp-content">
@@ -218,24 +243,28 @@ function ApplicationsPage({
   onChanged: () => Promise<unknown>;
   pending: boolean;
 }) {
+  const { formatDateTime, formatNumber, locale, t, translateError } = useControlPlaneI18n();
   const [open, setOpen] = useState(false);
   const [form] = Form.useForm<ApplicationForm>();
   const queryClient = useQueryClient();
   const applications = useQuery({
-    queryKey: ['applications', identity.workspace.id],
-    queryFn: () => listApplications(identity.workspace.id),
+    queryKey: ['applications', identity.workspace.id, locale.locale],
+    queryFn: () => listApplications(identity.workspace.id, locale.locale),
   });
   const promotedApplications = useMemo(() => uniqueApplications(matrix), [matrix]);
   const mutation = useMutation({
     mutationFn: (values: ApplicationForm) =>
       createWebApplication({
+        defaultLocale: values.defaultLocale,
+        localizations: applicationLocalizations(values),
         name: values.name,
         slug: values.slug,
         summary: values.summary,
         workspaceId: identity.workspace.id,
+        locale: locale.locale,
       }),
     onSuccess: async () => {
-      notify('Application registered');
+      notify(t('applications.registeredNotice'));
       setOpen(false);
       form.resetFields();
       await queryClient.invalidateQueries({ queryKey: ['applications', identity.workspace.id] });
@@ -246,39 +275,54 @@ function ApplicationsPage({
   return (
     <>
       <SectionIntro
-        eyebrow="Registry / Web applications"
+        eyebrow={t('applications.eyebrow')}
         title={
           <>
-            Every runtime has a <em>declared boundary.</em>
+            {t('applications.titleLead')} <em>{t('applications.titleEmphasis')}</em>
           </>
         }
-        description="Federation is reserved for reviewed code, iframes run across an origin boundary, and links never execute inside the shell."
+        description={t('applications.description')}
         action={
-          <Button type="primary" icon={<IconPlus />} onClick={() => setOpen(true)}>
-            Register application
+          <Button
+            type="primary"
+            icon={<IconPlus />}
+            onClick={() => {
+              if (!form.getFieldValue('defaultLocale')) form.setFieldValue('defaultLocale', locale.locale);
+              setOpen(true);
+            }}
+          >
+            {t('applications.register')}
           </Button>
         }
       />
       <div className="cp-metrics">
         <MetricCard
-          label="registered"
-          value={applications.data?.length ?? 0}
-          detail="visible in this workspace"
+          label={t('applications.metrics.registered')}
+          value={formatNumber(applications.data?.length ?? 0)}
+          detail={t('applications.metrics.registeredDetail')}
         />
         <MetricCard
-          label="federation"
-          value={promotedApplications.filter((item) => item.manifest.runtime === 'federation').length}
-          detail="promoted trusted runtimes"
+          label={t('applications.metrics.federation')}
+          value={formatNumber(
+            promotedApplications.filter((item) => item.manifest.runtime === 'federation').length,
+          )}
+          detail={t('applications.metrics.federationDetail')}
         />
         <MetricCard
-          label="isolated"
-          value={promotedApplications.filter((item) => item.manifest.runtime === 'iframe').length}
-          detail="promoted cross-origin frames"
+          label={t('applications.metrics.isolated')}
+          value={formatNumber(
+            promotedApplications.filter((item) => item.manifest.runtime === 'iframe').length,
+          )}
+          detail={t('applications.metrics.isolatedDetail')}
         />
-        <MetricCard label="stable" value={matrix.stable.length} detail="production channel entries" />
+        <MetricCard
+          label={t('applications.metrics.stable')}
+          value={formatNumber(matrix.stable.length)}
+          detail={t('applications.metrics.stableDetail')}
+        />
       </div>
       {applications.isError && (
-        <Alert className="cp-alert-inline" type="error" content={applications.error.message} />
+        <Alert className="cp-alert-inline" type="error" content={translateError(applications.error)} />
       )}
       <Card className="cp-table-card" bordered={false}>
         <Table
@@ -286,49 +330,87 @@ function ApplicationsPage({
           rowKey="id"
           pagination={false}
           data={applications.data ?? []}
-          noDataElement={<div className="cp-empty-inline">No application is registered yet.</div>}
+          noDataElement={<div className="cp-empty-inline">{t('applications.empty')}</div>}
           columns={[
             {
-              title: 'APPLICATION',
+              title: t('table.application'),
               render: (_, row: Application) => <RegisteredApplicationIdentity application={row} />,
             },
             {
-              title: 'KIND',
-              render: (_, row: Application) => <Tag bordered>{row.kind}</Tag>,
+              title: t('table.kind'),
+              render: (_, row: Application) => <Tag bordered>{t(`enums.applicationKind.${row.kind}`)}</Tag>,
             },
             {
-              title: 'STABLE',
+              title: t('table.stable'),
               render: (_, row: Application) => {
                 const stable = matrix.stable.find((entry) => entry.applicationId === row.id);
-                return stable ? <code>{stable.version}</code> : 'Not promoted';
+                return stable ? <code>{stable.version}</code> : t('applications.notPromoted');
               },
             },
             {
-              title: 'CREATED',
-              render: (_, row: Application) => formatDate(row.createdAt),
+              title: t('table.created'),
+              render: (_, row: Application) => formatDateTime(row.createdAt),
             },
           ]}
         />
       </Card>
 
       <Modal
-        title="Register web application"
+        title={t('applications.form.title')}
         visible={open}
         confirmLoading={mutation.isPending}
         onCancel={() => setOpen(false)}
         onOk={async () => mutation.mutate(await form.validate())}
       >
-        {mutation.isError && <Alert type="error" content={mutation.error.message} />}
-        <Form form={form} layout="vertical">
-          <Form.Item field="name" label="Name" rules={[{ required: true }]}>
-            <Input placeholder="Deployment radar" />
+        {mutation.isError && <Alert type="error" content={translateError(mutation.error)} />}
+        <Form form={form} initialValues={{ defaultLocale: locale.locale }} layout="vertical">
+          <Form.Item
+            field="defaultLocale"
+            label={t('applications.form.defaultLocale')}
+            rules={[{ required: true }]}
+          >
+            <Select
+              options={[
+                { label: t('locale.enUS'), value: 'en-US' },
+                { label: t('locale.zhCN'), value: 'zh-CN' },
+              ]}
+            />
           </Form.Item>
-          <Form.Item field="slug" label="Slug" rules={[{ required: true, match: /^[a-z][a-z0-9-]+$/ }]}>
-            <Input placeholder="deployment-radar" />
+          <Form.Item field="name" label={t('applications.form.defaultName')} rules={[{ required: true }]}>
+            <Input placeholder={t('applications.form.namePlaceholder')} />
           </Form.Item>
-          <Form.Item field="summary" label="Summary" rules={[{ required: true }]}>
-            <Input.TextArea placeholder="What the application does" />
+          <Form.Item
+            field="slug"
+            label={t('applications.form.slug')}
+            rules={[{ required: true, match: /^[a-z][a-z0-9-]+$/ }]}
+          >
+            <Input placeholder={t('applications.form.slugPlaceholder')} />
           </Form.Item>
+          <Form.Item
+            field="summary"
+            label={t('applications.form.defaultSummary')}
+            rules={[{ required: true }]}
+          >
+            <Input.TextArea placeholder={t('applications.form.summaryPlaceholder')} />
+          </Form.Item>
+          <div className="cp-form-section">
+            <strong>{t('applications.form.translations')}</strong>
+            <small>{t('applications.form.translationsDescription')}</small>
+          </div>
+          <div className="cp-localized-fields">
+            <Form.Item field="enUSName" label={t('applications.form.enUSName')}>
+              <Input allowClear />
+            </Form.Item>
+            <Form.Item field="enUSSummary" label={t('applications.form.enUSSummary')}>
+              <Input.TextArea allowClear />
+            </Form.Item>
+            <Form.Item field="zhCNName" label={t('applications.form.zhCNName')}>
+              <Input allowClear />
+            </Form.Item>
+            <Form.Item field="zhCNSummary" label={t('applications.form.zhCNSummary')}>
+              <Input.TextArea allowClear />
+            </Form.Item>
+          </div>
         </Form>
       </Modal>
     </>
@@ -336,14 +418,15 @@ function ApplicationsPage({
 }
 
 function ReleasesPage({ workspaceId }: { workspaceId: string }) {
+  const { formatDateTime, locale, t, translateError } = useControlPlaneI18n();
   const [selectedReleaseId, setSelectedReleaseId] = useState<string | null>(null);
   const releases = useQuery({
-    queryKey: ['releases', workspaceId, 'web'],
-    queryFn: () => listReleases(workspaceId, { kind: 'web' }),
+    queryKey: ['releases', workspaceId, 'web', locale.locale],
+    queryFn: () => listReleases(workspaceId, { kind: 'web' }, locale.locale),
   });
   const status = useQuery({
-    queryKey: ['release-status', selectedReleaseId],
-    queryFn: () => getReleaseStatus(selectedReleaseId!),
+    queryKey: ['release-status', selectedReleaseId, locale.locale],
+    queryFn: () => getReleaseStatus(selectedReleaseId!, locale.locale),
     enabled: selectedReleaseId !== null,
     retry: false,
   });
@@ -351,48 +434,40 @@ function ReleasesPage({ workspaceId }: { workspaceId: string }) {
   return (
     <>
       <SectionIntro
-        eyebrow="Supply chain / Signed release workflow"
+        eyebrow={t('releases.eyebrow')}
         title={
           <>
-            Package once. <em>Verify every byte.</em>
+            {t('releases.titleLead')} <em>{t('releases.titleEmphasis')}</em>
           </>
         }
-        description="A release is not published by submitting a URL. The signed artifact and its SBOM must both be uploaded, finalized, and submitted to the validation worker."
+        description={t('releases.description')}
       />
       <Card className="cp-workflow-card" bordered={false}>
-        <Alert
-          type="info"
-          title="Publishing is intentionally delegated to the signed CLI workflow"
-          content="This browser does not have access to publisher private keys and does not emulate artifact or SBOM uploads. Run the commands below from the micro-app project."
-        />
+        <Alert type="info" title={t('releases.workflowTitle')} content={t('releases.workflowDescription')} />
         <ol className="cp-release-steps">
           <li>
-            Build and sign the immutable package:{' '}
+            {t('releases.stepPackage')}{' '}
             <code>aw package --key-id &lt;key-id&gt; --private-key &lt;key.pem&gt;</code>
           </li>
           <li>
-            Authenticate without a long-lived token: <code>aw login --api &lt;api-url&gt;</code>
+            {t('releases.stepLogin')} <code>aw login --api &lt;api-url&gt;</code>
           </li>
           <li>
-            Create, upload artifact + SBOM, finalize, and submit:{' '}
-            <code>aw publish --application-id &lt;uuid&gt;</code>
+            {t('releases.stepPublish')} <code>aw publish --application-id &lt;uuid&gt;</code>
           </li>
         </ol>
-        <small className="cp-contract-note">
-          The server lifecycle is draft → uploading → validating → ready → approved/rejected. No channel is
-          selected while creating a release.
-        </small>
+        <small className="cp-contract-note">{t('releases.lifecycle')}</small>
       </Card>
 
       <div className="cp-table-heading">
         <div>
-          <span>IMMUTABLE RELEASES</span>
-          <h3>Workspace release history</h3>
+          <span>{t('releases.historyEyebrow')}</span>
+          <h3>{t('releases.historyTitle')}</h3>
         </div>
-        <small>Draft, upload, validation and review state come directly from the control plane.</small>
+        <small>{t('releases.historyDescription')}</small>
       </div>
       {releases.isError && (
-        <Alert className="cp-alert-inline" type="error" content={releases.error.message} />
+        <Alert className="cp-alert-inline" type="error" content={translateError(releases.error)} />
       )}
       <Card className="cp-table-card" bordered={false}>
         <Table
@@ -400,31 +475,34 @@ function ReleasesPage({ workspaceId }: { workspaceId: string }) {
           rowKey={(row) => row.release.id}
           data={releases.data ?? []}
           pagination={{ pageSize: 10 }}
-          noDataElement={<div className="cp-empty-inline">No signed release has been created yet.</div>}
+          noDataElement={<div className="cp-empty-inline">{t('releases.empty')}</div>}
           columns={[
             {
-              title: 'APPLICATION',
+              title: t('table.application'),
               render: (_, row: ReleaseListItem) => <ReleaseApplicationIdentity item={row} />,
             },
-            { title: 'VERSION', render: (_, row: ReleaseListItem) => <code>{row.release.version}</code> },
             {
-              title: 'STATUS',
+              title: t('table.version'),
+              render: (_, row: ReleaseListItem) => <code>{row.release.version}</code>,
+            },
+            {
+              title: t('table.status'),
               render: (_, row: ReleaseListItem) => <ReleaseStatusTag status={row.release.status} />,
             },
             {
-              title: 'RUNTIME',
+              title: t('table.runtime'),
               render: (_, row: ReleaseListItem) => <ReleaseRuntimeTag item={row} />,
             },
-            { title: 'ARTIFACTS', dataIndex: 'artifactCount' },
+            { title: t('table.artifacts'), dataIndex: 'artifactCount' },
             {
-              title: 'CREATED',
-              render: (_, row: ReleaseListItem) => formatDate(row.release.createdAt),
+              title: t('table.created'),
+              render: (_, row: ReleaseListItem) => formatDateTime(row.release.createdAt),
             },
             {
               title: '',
               render: (_, row: ReleaseListItem) => (
                 <Button size="small" onClick={() => setSelectedReleaseId(row.release.id)}>
-                  Inspect evidence
+                  {t('releases.inspectEvidence')}
                 </Button>
               ),
             },
@@ -433,23 +511,26 @@ function ReleasesPage({ workspaceId }: { workspaceId: string }) {
       </Card>
 
       {status.isFetching && <Skeleton className="cp-inspector" animation text={{ rows: 4 }} />}
-      {status.isError && <Alert className="cp-alert-inline" type="error" content={status.error.message} />}
+      {status.isError && (
+        <Alert className="cp-alert-inline" type="error" content={translateError(status.error)} />
+      )}
       {status.data && <ReleaseStatusPanel view={status.data} />}
     </>
   );
 }
 
 function ChannelsPage({ matrix, pending }: { matrix: CatalogMatrix; pending: boolean }) {
+  const { formatNumber, localizeContent, t } = useControlPlaneI18n();
   return (
     <>
       <SectionIntro
-        eyebrow="Delivery / Release channels"
+        eyebrow={t('channels.eyebrow')}
         title={
           <>
-            Three gates, one <em>release identity.</em>
+            {t('channels.titleLead')} <em>{t('channels.titleEmphasis')}</em>
           </>
         }
-        description="Development absorbs change, canary proves behavior, and stable serves production. No artifact is rebuilt between gates."
+        description={t('channels.description')}
       />
       <div className="cp-channel-grid">
         {CHANNELS.map((channel, index) => (
@@ -457,22 +538,25 @@ function ChannelsPage({ matrix, pending }: { matrix: CatalogMatrix; pending: boo
             <header>
               <span>0{index + 1}</span>
               <ChannelTag channel={channel} />
-              <strong>{matrix[channel].length}</strong>
+              <strong>{formatNumber(matrix[channel].length)}</strong>
             </header>
             {pending ? (
               <Skeleton animation text={{ rows: 4 }} />
             ) : matrix[channel].length === 0 ? (
-              <div className="cp-channel__empty">No release assigned</div>
+              <div className="cp-channel__empty">{t('channels.empty')}</div>
             ) : (
-              matrix[channel].map((entry) => (
-                <article key={entry.releaseId}>
-                  <div>
-                    <strong>{entry.name}</strong>
-                    <small>{entry.slug}</small>
-                  </div>
-                  <code>{entry.version}</code>
-                </article>
-              ))
+              matrix[channel].map((entry) => {
+                const content = localizeContent(entry, entry.localizations, entry.defaultLocale);
+                return (
+                  <article key={entry.releaseId} title={content.summary}>
+                    <div>
+                      <strong>{content.name}</strong>
+                      <small>{entry.slug}</small>
+                    </div>
+                    <code>{entry.version}</code>
+                  </article>
+                );
+              })
             )}
           </section>
         ))}
@@ -482,27 +566,28 @@ function ChannelsPage({ matrix, pending }: { matrix: CatalogMatrix; pending: boo
 }
 
 function ApprovalsPage({ identity, notify }: { identity: Identity; notify: (message: string) => void }) {
+  const { formatDateTime, formatNumber, locale, t, translateError } = useControlPlaneI18n();
   const queryClient = useQueryClient();
   const [selectedReleaseId, setSelectedReleaseId] = useState<string | null>(null);
   const [comment, setComment] = useState('');
   const queue = useQuery({
-    queryKey: ['review-queue', identity.workspace.id, 'web'],
-    queryFn: () => listPendingReviews(identity.workspace.id, 'web'),
+    queryKey: ['review-queue', identity.workspace.id, 'web', locale.locale],
+    queryFn: () => listPendingReviews(identity.workspace.id, 'web', locale.locale),
   });
   const status = useQuery({
-    queryKey: ['release-status', selectedReleaseId],
-    queryFn: () => getReleaseStatus(selectedReleaseId!),
+    queryKey: ['release-status', selectedReleaseId, locale.locale],
+    queryFn: () => getReleaseStatus(selectedReleaseId!, locale.locale),
     enabled: selectedReleaseId !== null,
     retry: false,
   });
   const mutation = useMutation({
     mutationFn: (decision: 'approve' | 'reject') => {
-      if (!selectedReleaseId) throw new Error('Select a pending release before recording a review');
-      return reviewRelease({ comment, decision, releaseId: selectedReleaseId });
+      if (!selectedReleaseId) throw new Error(t('approvals.selectPending'));
+      return reviewRelease({ comment, decision, releaseId: selectedReleaseId, locale: locale.locale });
     },
     onSuccess: async (view, decision) => {
-      queryClient.setQueryData(['release-status', view.release.id], view);
-      notify(decision === 'approve' ? 'Approval recorded' : 'Rejection recorded');
+      queryClient.setQueryData(['release-status', view.release.id, locale.locale], view);
+      notify(decision === 'approve' ? t('approvals.approvalRecorded') : t('approvals.rejectionRecorded'));
       setComment('');
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['review-queue', identity.workspace.id] }),
@@ -519,22 +604,20 @@ function ApprovalsPage({ identity, notify }: { identity: Identity; notify: (mess
   return (
     <>
       <SectionIntro
-        eyebrow="Governance / Release review"
+        eyebrow={t('approvals.eyebrow')}
         title={
           <>
-            Human judgment before <em>channel movement.</em>
+            {t('approvals.titleLead')} <em>{t('approvals.titleEmphasis')}</em>
           </>
         }
-        description="A review changes a validated release from ready to approved or rejected. It does not promote a channel pointer."
+        description={t('approvals.description')}
       />
       {!canReview && (
-        <Alert
-          className="cp-alert-inline"
-          type="warning"
-          content="You can inspect release evidence, but only PlatformAdmin or OfficialReviewer can record a review. Workspace Owner/Admin alone is not review authority."
-        />
+        <Alert className="cp-alert-inline" type="warning" content={t('approvals.insufficientAuthority')} />
       )}
-      {queue.isError && <Alert className="cp-alert-inline" type="error" content={queue.error.message} />}
+      {queue.isError && (
+        <Alert className="cp-alert-inline" type="error" content={translateError(queue.error)} />
+      )}
       <Card className="cp-table-card" bordered={false}>
         <Table
           loading={queue.isPending}
@@ -544,29 +627,36 @@ function ApprovalsPage({ identity, notify }: { identity: Identity; notify: (mess
           noDataElement={
             <div className="cp-empty-queue">
               <IconCheckCircle />
-              No validated release is waiting for review.
+              {t('approvals.empty')}
             </div>
           }
           columns={[
             {
-              title: 'APPLICATION',
+              title: t('table.application'),
               render: (_, row: ReleaseListItem) => <ReleaseApplicationIdentity item={row} />,
             },
-            { title: 'VERSION', render: (_, row: ReleaseListItem) => <code>{row.release.version}</code> },
             {
-              title: 'EVIDENCE',
-              render: (_, row: ReleaseListItem) => row.release.validationEvidence.length,
+              title: t('table.version'),
+              render: (_, row: ReleaseListItem) => <code>{row.release.version}</code>,
             },
-            { title: 'ARTIFACTS', dataIndex: 'artifactCount' },
             {
-              title: 'CREATED',
-              render: (_, row: ReleaseListItem) => formatDate(row.release.createdAt),
+              title: t('table.evidence'),
+              render: (_, row: ReleaseListItem) => formatNumber(row.release.validationEvidence.length),
+            },
+            {
+              title: t('table.artifacts'),
+              dataIndex: 'artifactCount',
+              render: (value: number) => formatNumber(value),
+            },
+            {
+              title: t('table.created'),
+              render: (_, row: ReleaseListItem) => formatDateTime(row.release.createdAt),
             },
             {
               title: '',
               render: (_, row: ReleaseListItem) => (
                 <Button size="small" onClick={() => setSelectedReleaseId(row.release.id)}>
-                  Review evidence
+                  {t('approvals.reviewEvidence')}
                 </Button>
               ),
             },
@@ -575,7 +665,9 @@ function ApprovalsPage({ identity, notify }: { identity: Identity; notify: (mess
       </Card>
 
       {status.isFetching && <Skeleton className="cp-inspector" animation text={{ rows: 4 }} />}
-      {status.isError && <Alert className="cp-alert-inline" type="error" content={status.error.message} />}
+      {status.isError && (
+        <Alert className="cp-alert-inline" type="error" content={translateError(status.error)} />
+      )}
       {status.data && (
         <section className="cp-inspector">
           <>
@@ -583,32 +675,31 @@ function ApprovalsPage({ identity, notify }: { identity: Identity; notify: (mess
             <Card className="cp-review-card" bordered={false}>
               <header>
                 <div>
-                  <span>REVIEW DECISION</span>
+                  <span>{t('approvals.decisionEyebrow')}</span>
                   <h3>
-                    {isReady ? 'Validation complete — decision required' : `Release is ${release?.status}`}
+                    {isReady
+                      ? t('approvals.decisionRequired')
+                      : t('approvals.releaseState', {
+                          status: release ? t(`enums.releaseStatus.${release.status}`) : '—',
+                        })}
                   </h3>
                 </div>
                 {release && <ReleaseStatusTag status={release.status} />}
               </header>
-              {!isReady && (
-                <Alert
-                  type="warning"
-                  content="The review API accepts only a ready release. Refresh after validation completes; approved or rejected releases cannot be reviewed again."
-                />
-              )}
-              {mutation.isError && <Alert type="error" content={mutation.error.message} />}
+              {!isReady && <Alert type="warning" content={t('approvals.notReady')} />}
+              {mutation.isError && <Alert type="error" content={translateError(mutation.error)} />}
               <Input.TextArea
                 disabled={!canReview || !isReady}
                 maxLength={1000}
                 onChange={setComment}
-                placeholder="Evidence-based reviewer comment (optional)"
+                placeholder={t('approvals.commentPlaceholder')}
                 showWordLimit
                 value={comment}
               />
               <Space className="cp-review-actions">
                 <Popconfirm
                   disabled={!canReview || !isReady}
-                  title={`Approve release ${release?.version ?? ''}?`}
+                  title={t('approvals.approveConfirm', { version: release?.version ?? '' })}
                   onOk={() => mutation.mutate('approve')}
                 >
                   <Button
@@ -617,23 +708,20 @@ function ApprovalsPage({ identity, notify }: { identity: Identity; notify: (mess
                     loading={mutation.isPending}
                     icon={<IconCheckCircle />}
                   >
-                    Record approval
+                    {t('approvals.recordApproval')}
                   </Button>
                 </Popconfirm>
                 <Popconfirm
                   disabled={!canReview || !isReady}
-                  title={`Reject release ${release?.version ?? ''}?`}
+                  title={t('approvals.rejectConfirm', { version: release?.version ?? '' })}
                   onOk={() => mutation.mutate('reject')}
                 >
                   <Button status="danger" disabled={!canReview || !isReady} loading={mutation.isPending}>
-                    Record rejection
+                    {t('approvals.recordRejection')}
                   </Button>
                 </Popconfirm>
               </Space>
-              <small className="cp-contract-note">
-                After approval, an Owner/Admin must promote the immutable release separately with{' '}
-                <code>aw promote</code> and an optimistic <code>expectedCurrentReleaseId</code>.
-              </small>
+              <small className="cp-contract-note">{t('approvals.promotionNote')}</small>
             </Card>
           </>
         </section>
@@ -643,11 +731,12 @@ function ApprovalsPage({ identity, notify }: { identity: Identity; notify: (mess
 }
 
 function ReleaseStatusPanel({ view }: { view: ReleaseStatusView }) {
+  const { formatBytes, formatDateTime, formatNumber, t } = useControlPlaneI18n();
   return (
     <Card className="cp-release-status" bordered={false}>
       <header>
         <div>
-          <span>SERVER RELEASE STATUS</span>
+          <span>{t('releasePanel.eyebrow')}</span>
           <h3>{view.release.version}</h3>
           <code>{view.release.id}</code>
         </div>
@@ -655,20 +744,20 @@ function ReleaseStatusPanel({ view }: { view: ReleaseStatusView }) {
       </header>
       <div className="cp-release-facts">
         <div>
-          <span>APPLICATION</span>
+          <span>{t('releasePanel.application')}</span>
           <code>{view.release.applicationId}</code>
         </div>
         <div>
-          <span>MANIFEST</span>
-          <strong>{view.release.manifest.kind}</strong>
+          <span>{t('releasePanel.manifest')}</span>
+          <strong>{t(`enums.applicationKind.${view.release.manifest.kind}`)}</strong>
         </div>
         <div>
-          <span>ARTIFACTS</span>
-          <strong>{view.artifacts.length}</strong>
+          <span>{t('releasePanel.artifacts')}</span>
+          <strong>{formatNumber(view.artifacts.length)}</strong>
         </div>
         <div>
-          <span>REVIEWS</span>
-          <strong>{view.reviews.length}</strong>
+          <span>{t('releasePanel.reviews')}</span>
+          <strong>{formatNumber(view.reviews.length)}</strong>
         </div>
       </div>
       <Table
@@ -676,15 +765,19 @@ function ReleaseStatusPanel({ view }: { view: ReleaseStatusView }) {
         data={view.artifacts}
         pagination={false}
         rowKey="id"
-        noDataElement={<div className="cp-empty-inline">No artifact upload has been registered.</div>}
+        noDataElement={<div className="cp-empty-inline">{t('releasePanel.emptyArtifacts')}</div>}
         columns={[
-          { title: 'ARTIFACT', dataIndex: 'fileName' },
-          { title: 'SIZE', dataIndex: 'size', render: (size: number) => formatBytes(size) },
-          { title: 'STATUS', dataIndex: 'status', render: (status: string) => <Tag bordered>{status}</Tag> },
+          { title: t('table.artifact'), dataIndex: 'fileName' },
+          { title: t('table.size'), dataIndex: 'size', render: (size: number) => formatBytes(size) },
           {
-            title: 'FINALIZED',
+            title: t('table.status'),
+            dataIndex: 'status',
+            render: (status: string) => <Tag bordered>{t(`enums.artifactStatus.${status}`)}</Tag>,
+          },
+          {
+            title: t('table.finalized'),
             dataIndex: 'finalizedAt',
-            render: (value?: string) => (value ? formatDate(value) : '—'),
+            render: (value?: string) => (value ? formatDateTime(value) : '—'),
           },
         ]}
       />
@@ -697,14 +790,20 @@ function ReleaseStatusPanel({ view }: { view: ReleaseStatusView }) {
           rowKey="id"
           columns={[
             {
-              title: 'DECISION',
+              title: t('table.decision'),
               dataIndex: 'decision',
               render: (decision: string) => (
-                <Tag color={decision === 'approve' ? 'green' : 'red'}>{decision}</Tag>
+                <Tag color={decision === 'approve' ? 'green' : 'red'}>
+                  {t(`enums.reviewDecision.${decision}`)}
+                </Tag>
               ),
             },
-            { title: 'COMMENT', dataIndex: 'comment', render: (value: string) => value || '—' },
-            { title: 'RECORDED', dataIndex: 'createdAt', render: (value: string) => formatDate(value) },
+            { title: t('table.comment'), dataIndex: 'comment', render: (value: string) => value || '—' },
+            {
+              title: t('table.recorded'),
+              dataIndex: 'createdAt',
+              render: (value: string) => formatDateTime(value),
+            },
           ]}
         />
       )}
@@ -713,60 +812,65 @@ function ReleaseStatusPanel({ view }: { view: ReleaseStatusView }) {
 }
 
 function ReleaseStatusTag({ status }: { status: ReleaseStatus }) {
+  const { t } = useControlPlaneI18n();
   const color =
     status === 'approved' ? 'green' : status === 'rejected' ? 'red' : status === 'ready' ? 'orange' : 'gray';
   return (
     <Tag bordered color={color}>
-      {status}
+      {t(`enums.releaseStatus.${status}`)}
     </Tag>
   );
 }
 
-function AppIdentity({ entry }: { entry: CatalogEntry }) {
-  return (
-    <div className="cp-app-id">
-      <strong>{entry.name}</strong>
-      <small>{entry.slug}</small>
-    </div>
-  );
-}
-
 function RegisteredApplicationIdentity({ application }: { application: Application }) {
+  const { localizeContent } = useControlPlaneI18n();
+  const content = localizeContent(application, application.localizations, application.defaultLocale);
   return (
     <div className="cp-app-id">
-      <strong>{application.name}</strong>
-      <small>{application.slug}</small>
+      <strong>{content.name}</strong>
+      <small className="cp-app-id__summary">{content.summary}</small>
+      <span className="cp-block-id">{application.slug}</span>
     </div>
   );
 }
 
 function ReleaseApplicationIdentity({ item }: { item: ReleaseListItem }) {
+  const { localizeContent } = useControlPlaneI18n();
+  const content = localizeContent(
+    item.application,
+    item.application.localizations,
+    item.application.defaultLocale,
+  );
   return (
     <div className="cp-app-id">
-      <strong>{item.application.name}</strong>
-      <small>{item.application.slug}</small>
+      <strong>{content.name}</strong>
+      <small className="cp-app-id__summary">{content.summary}</small>
+      <span className="cp-block-id">{item.application.slug}</span>
     </div>
   );
 }
 
 function ReleaseRuntimeTag({ item }: { item: ReleaseListItem }) {
-  if (item.release.manifest.kind !== 'web') return <Tag bordered>desktop</Tag>;
+  const { t } = useControlPlaneI18n();
+  if (item.release.manifest.kind !== 'web') return <Tag bordered>{t('enums.applicationKind.desktop')}</Tag>;
   return <RuntimeTag runtime={item.release.manifest.runtime} />;
 }
 
 function RuntimeTag({ runtime }: { runtime: WebManifest['runtime'] }) {
+  const { t } = useControlPlaneI18n();
   return (
     <Tag bordered color={runtime === 'federation' ? 'lime' : runtime === 'iframe' ? 'arcoblue' : 'gray'}>
-      {runtime}
+      {t(`enums.runtime.${runtime}`)}
     </Tag>
   );
 }
 
 function ChannelTag({ channel }: { channel: ReleaseChannel }) {
+  const { t } = useControlPlaneI18n();
   const color = channel === 'stable' ? 'green' : channel === 'canary' ? 'orange' : 'gray';
   return (
     <Tag bordered color={color}>
-      {channel}
+      {t(`enums.channel.${channel}`)}
     </Tag>
   );
 }
@@ -776,20 +880,35 @@ function uniqueApplications(matrix: CatalogMatrix): CatalogEntry[] {
   return [...new Map(entries.map((entry) => [entry.applicationId, entry])).values()];
 }
 
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(
-    new Date(value),
-  );
-}
-
-function formatBytes(value: number): string {
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
-  return `${(value / (1024 * 1024)).toFixed(1)} MiB`;
-}
-
 type ApplicationForm = {
+  defaultLocale: SupportedLocale;
+  enUSName?: string;
+  enUSSummary?: string;
   name: string;
   slug: string;
   summary: string;
+  zhCNName?: string;
+  zhCNSummary?: string;
 };
+
+function applicationLocalizations(values: ApplicationForm): ApplicationLocalizations {
+  const enUS = compactLocalizedContent(values.enUSName, values.enUSSummary);
+  const zhCN = compactLocalizedContent(values.zhCNName, values.zhCNSummary);
+  return {
+    ...(enUS ? { 'en-US': enUS } : {}),
+    ...(zhCN ? { 'zh-CN': zhCN } : {}),
+  };
+}
+
+function compactLocalizedContent(
+  name: string | undefined,
+  summary: string | undefined,
+): { name?: string; summary?: string } | undefined {
+  const normalizedName = name?.trim();
+  const normalizedSummary = summary?.trim();
+  if (!normalizedName && !normalizedSummary) return undefined;
+  return {
+    ...(normalizedName ? { name: normalizedName } : {}),
+    ...(normalizedSummary ? { summary: normalizedSummary } : {}),
+  };
+}

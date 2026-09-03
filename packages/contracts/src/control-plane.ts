@@ -8,6 +8,8 @@ import {
   Sha256Schema,
 } from '@awesome-workflow/manifest-schema';
 
+import { ApplicationLocalizationsSchema, SupportedLocaleSchema } from './locale.js';
+
 export const ApplicationKindSchema = z.enum(['web', 'desktop']);
 export type ApplicationKind = z.infer<typeof ApplicationKindSchema>;
 export const ReleaseChannelNameSchema = z.enum(['dev', 'canary', 'stable']);
@@ -30,6 +32,8 @@ export const ApplicationSchema = z.object({
   slug: ApplicationSlugSchema,
   name: z.string().min(2).max(80),
   summary: z.string().max(240),
+  defaultLocale: SupportedLocaleSchema.default('en-US'),
+  localizations: ApplicationLocalizationsSchema,
   kind: ApplicationKindSchema,
   createdAt: z.string().datetime(),
 });
@@ -38,6 +42,8 @@ export const CreateApplicationInputSchema = ApplicationSchema.pick({
   slug: true,
   name: true,
   summary: true,
+  defaultLocale: true,
+  localizations: true,
   kind: true,
 });
 export type CreateApplicationInput = z.infer<typeof CreateApplicationInputSchema>;
@@ -57,7 +63,7 @@ export type SbomDescriptor = z.infer<typeof SbomDescriptorSchema>;
 export const ValidationEvidenceSchema = z.object({
   id: z.string().uuid(),
   validator: z.string().min(1).max(120),
-  check: z.enum(['manifest', 'digest', 'signature', 'sbom', 'archive', 'platform', 'permissions']),
+  check: z.enum(['manifest', 'csp', 'digest', 'signature', 'sbom', 'archive', 'platform', 'permissions']),
   outcome: z.enum(['passed', 'failed']),
   observedAt: z.string().datetime(),
   details: z.record(z.string(), z.unknown()).default({}),
@@ -184,6 +190,8 @@ export const CatalogEntrySchema = z.object({
   slug: ApplicationSlugSchema,
   name: z.string(),
   summary: z.string(),
+  defaultLocale: SupportedLocaleSchema.default('en-US'),
+  localizations: ApplicationLocalizationsSchema,
   kind: ApplicationKindSchema,
   releaseId: z.string().uuid(),
   version: SemanticVersionSchema,

@@ -4,6 +4,8 @@ import { IconCloudDownload, IconRefresh, IconSync } from '@arco-design/web-react
 
 import { isTauriRuntime } from '@/services/desktopHost';
 import { desktopUpdater } from '@/services/desktopUpdater';
+import { formatUiError, normalizeUiError } from '@/i18n/errors';
+import { useLocale, type Translate } from '@/i18n/localeContext';
 import {
   createInitialUpdateState,
   isUpdateBusy,
@@ -12,6 +14,7 @@ import {
 } from '@/services/updateState';
 
 export function UpdatePage() {
+  const { formatBytes, formatDateTime, t } = useLocale();
   const [state, dispatch] = useReducer(reduceDesktopUpdate, isTauriRuntime(), createInitialUpdateState);
   const progress = updateProgressPercent(state);
   const busy = isUpdateBusy(state.phase);
@@ -22,7 +25,7 @@ export function UpdatePage() {
       const update = await desktopUpdater.check();
       dispatch(update ? { type: 'update-available', update } : { type: 'no-update' });
     } catch (error) {
-      dispatch({ type: 'failed', error: describe(error) });
+      dispatch({ type: 'failed', error: normalizeUiError(error, 'updater_check_failed') });
     }
   };
 
@@ -38,7 +41,7 @@ export function UpdatePage() {
         }
       });
     } catch (error) {
-      dispatch({ type: 'failed', error: describe(error) });
+      dispatch({ type: 'failed', error: normalizeUiError(error, 'updater_download_failed') });
     }
   };
 
@@ -48,7 +51,7 @@ export function UpdatePage() {
       await desktopUpdater.install();
       dispatch({ type: 'installed' });
     } catch (error) {
-      dispatch({ type: 'failed', error: describe(error) });
+      dispatch({ type: 'failed', error: normalizeUiError(error, 'updater_install_failed') });
     }
   };
 
@@ -56,7 +59,7 @@ export function UpdatePage() {
     try {
       await desktopUpdater.restart();
     } catch (error) {
-      dispatch({ type: 'failed', error: describe(error) });
+      dispatch({ type: 'failed', error: normalizeUiError(error, 'updater_restart_failed') });
     }
   };
 
@@ -65,50 +68,42 @@ export function UpdatePage() {
       <header className="page-lead">
         <div>
           <span>07</span>
-          <p>SIGNED HOST DELIVERY</p>
+          <p>{t('updates.eyebrow')}</p>
         </div>
-        <h1>Desktop updates</h1>
-        <p>
-          Checks use the HTTPS endpoint and updater public key fixed into this binary at release build time.
-          The UI cannot enter or override an endpoint, proxy, header, target, or signing key.
-        </p>
+        <h1>{t('updates.title')}</h1>
+        <p>{t('updates.description')}</p>
       </header>
 
       <article className="surface update-console">
         <div className="surface-heading">
           <div>
-            <p>UPDATE STATE</p>
-            <h2>{phaseTitle(state.phase)}</h2>
+            <p>{t('updates.state')}</p>
+            <h2>{phaseTitle(state.phase, t)}</h2>
           </div>
-          <Tag color={phaseColor(state.phase)}>{state.phase.replaceAll('-', ' ').toUpperCase()}</Tag>
+          <Tag color={phaseColor(state.phase)}>{phaseLabel(state.phase, t)}</Tag>
         </div>
 
-        {state.phase === 'unavailable' && (
-          <Alert type="warning" content="Updater commands are unavailable in browser preview mode." />
-        )}
-        {state.phase === 'idle' && (
-          <Alert
-            type="info"
-            content="Updates are never checked automatically. If this release was built without endpoint or public-key configuration, the check fails closed."
-          />
-        )}
-        {state.phase === 'up-to-date' && <Alert type="success" content="This signed build is up to date." />}
+        {state.phase === 'unavailable' && <Alert type="warning" content={t('updates.browserUnavailable')} />}
+        {state.phase === 'idle' && <Alert type="info" content={t('updates.idleDescription')} />}
+        {state.phase === 'up-to-date' && <Alert type="success" content={t('updates.upToDate')} />}
         {state.phase === 'error' && (
-          <Alert type="error" title="Update stopped" content={state.error ?? 'Unknown error'} />
+          <Alert type="error" title={t('updates.stopped')} content={formatUiError(state.error, t)} />
         )}
 
         {state.update && (
           <div className="update-release">
             <div>
-              <span>CURRENT</span>
+              <span>{t('updates.current')}</span>
               <strong>{state.update.currentVersion}</strong>
             </div>
             <i>→</i>
             <div>
-              <span>SIGNED CANDIDATE</span>
+              <span>{t('updates.candidate')}</span>
               <strong>{state.update.version}</strong>
             </div>
-            {state.update.date && <time dateTime={state.update.date}>{formatDate(state.update.date)}</time>}
+            {state.update.date && (
+              <time dateTime={state.update.date}>{safeFormatDate(state.update.date, formatDateTime)}</time>
+            )}
           </div>
         )}
 
@@ -119,8 +114,8 @@ export function UpdatePage() {
             <Progress percent={progress ?? 0} showText={progress !== null} animation />
             <small>
               {progress === null
-                ? `${formatBytes(state.downloadedBytes)} downloaded`
-                : 'Signed package download'}
+                ? t('updates.downloaded', { bytes: formatBytes(state.downloadedBytes) })
+                : t('updates.signedDownload')}
             </small>
           </div>
         )}
@@ -132,7 +127,7 @@ export function UpdatePage() {
             loading={state.phase === 'checking'}
             onClick={() => void checkForUpdate()}
           >
-            Check explicitly
+            {t('updates.check')}
           </Button>
           <Button
             type="primary"
@@ -141,15 +136,15 @@ export function UpdatePage() {
             loading={state.phase === 'downloading'}
             onClick={() => void download()}
           >
-            Download signed update
+            {t('updates.download')}
           </Button>
           <Popconfirm
             disabled={state.phase !== 'downloaded'}
-            title="Install the downloaded update? Windows may close this UI while its installer runs."
+            title={t('updates.installConfirm')}
             onOk={() => install()}
           >
             <Button disabled={state.phase !== 'downloaded'} loading={state.phase === 'installing'}>
-              Install update
+              {t('updates.install')}
             </Button>
           </Popconfirm>
           <Button
@@ -157,7 +152,7 @@ export function UpdatePage() {
             disabled={state.phase !== 'restart-required'}
             onClick={() => void restart()}
           >
-            Restart now
+            {t('updates.restart')}
           </Button>
         </Space>
       </article>
@@ -165,53 +160,52 @@ export function UpdatePage() {
       <div className="update-boundaries">
         <article>
           <span>01</span>
-          <strong>Fixed endpoint</strong>
-          <p>
-            Only the release-build updater configuration is consulted; there is no arbitrary URL API in this
-            UI.
-          </p>
+          <strong>{t('updates.boundaries.endpointTitle')}</strong>
+          <p>{t('updates.boundaries.endpointCopy')}</p>
         </article>
         <article>
           <span>02</span>
-          <strong>Signature before install</strong>
-          <p>Tauri verifies the downloaded updater artifact against the embedded updater public key.</p>
+          <strong>{t('updates.boundaries.signatureTitle')}</strong>
+          <p>{t('updates.boundaries.signatureCopy')}</p>
         </article>
         <article>
           <span>03</span>
-          <strong>User-controlled phases</strong>
-          <p>
-            Check, download, install, and relaunch are separate user actions rather than background side
-            effects.
-          </p>
+          <strong>{t('updates.boundaries.phasesTitle')}</strong>
+          <p>{t('updates.boundaries.phasesCopy')}</p>
         </article>
       </div>
     </section>
   );
 }
 
-function phaseTitle(phase: string): string {
+function phaseTitle(phase: string, t: Translate): string {
   switch (phase) {
     case 'idle':
-      return 'Ready for an explicit check';
+      return t('updates.phaseTitles.idle');
     case 'checking':
-      return 'Checking signed release metadata';
+      return t('updates.phaseTitles.checking');
     case 'up-to-date':
-      return 'No newer release';
+      return t('updates.phaseTitles.upToDate');
     case 'available':
-      return 'A signed candidate is available';
+      return t('updates.phaseTitles.available');
     case 'downloading':
-      return 'Downloading updater artifact';
+      return t('updates.phaseTitles.downloading');
     case 'downloaded':
-      return 'Download complete';
+      return t('updates.phaseTitles.downloaded');
     case 'installing':
-      return 'Installing update';
+      return t('updates.phaseTitles.installing');
     case 'restart-required':
-      return 'Restart required';
+      return t('updates.phaseTitles.restartRequired');
     case 'error':
-      return 'Fail-closed stop';
+      return t('updates.phaseTitles.error');
     default:
-      return 'Updater unavailable';
+      return t('updates.phaseTitles.unavailable');
   }
+}
+
+function phaseLabel(phase: string, t: Translate): string {
+  const key = phase === 'up-to-date' ? 'upToDate' : phase === 'restart-required' ? 'restartRequired' : phase;
+  return t(`updates.phaseLabels.${key}`);
 }
 
 function phaseColor(phase: string): 'green' | 'orange' | 'red' | 'gray' | 'arcoblue' {
@@ -222,17 +216,10 @@ function phaseColor(phase: string): 'green' | 'orange' | 'red' | 'gray' | 'arcob
   return 'gray';
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
-}
-
-function formatDate(value: string): string {
+function safeFormatDate(
+  value: string,
+  formatDateTime: (value: Date | number | string, options?: Intl.DateTimeFormatOptions) => string,
+): string {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
-}
-
-function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return Number.isNaN(date.getTime()) ? value : formatDateTime(date);
 }

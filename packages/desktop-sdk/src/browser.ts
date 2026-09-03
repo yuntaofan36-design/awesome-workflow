@@ -61,13 +61,23 @@ export function consumeWebUiTaskContext(
   if (!isRecord(decoded)) {
     throw new DesktopRpcError('Web UI task bootstrap is malformed');
   }
-  const expectedKeys = ['protocolVersion', 'appId', 'taskId', 'lease', 'rpcEndpoint', 'workDirectory'];
+  const expectedKeys = [
+    'protocolVersion',
+    'appId',
+    'taskId',
+    'lease',
+    'rpcEndpoint',
+    'workDirectory',
+    'locale',
+    'fallbackLocales',
+  ];
   const keys = Object.keys(decoded);
   if (keys.length !== expectedKeys.length || expectedKeys.some((key) => !keys.includes(key))) {
     throw new DesktopRpcError('Web UI task bootstrap is malformed');
   }
 
-  const { protocolVersion, appId, taskId, lease, rpcEndpoint, workDirectory } = decoded;
+  const { protocolVersion, appId, taskId, lease, rpcEndpoint, workDirectory, locale, fallbackLocales } =
+    decoded;
   if (
     protocolVersion !== DESKTOP_RPC_PROTOCOL_VERSION ||
     !isBoundedString(appId, 3, 64) ||
@@ -75,7 +85,10 @@ export function consumeWebUiTaskContext(
     !isBoundedString(taskId, 1, 128) ||
     !isBoundedString(lease, 32, 512) ||
     rpcEndpoint !== WEB_UI_RPC_PATH ||
-    !isBoundedString(workDirectory, 1, 4096)
+    !isBoundedString(workDirectory, 1, 4096) ||
+    (locale !== 'en-US' && locale !== 'zh-CN') ||
+    !Array.isArray(fallbackLocales) ||
+    fallbackLocales.some((value) => value !== 'en-US' && value !== 'zh-CN')
   ) {
     throw new DesktopRpcError('Web UI task bootstrap is incompatible');
   }
@@ -87,6 +100,8 @@ export function consumeWebUiTaskContext(
     lease,
     rpcEndpoint,
     workDirectory,
+    locale,
+    fallbackLocales,
   };
 }
 

@@ -38,11 +38,12 @@ test('CLI browser authorization uses exact loopback PKCE and rejects code replay
   const authorization = await server.inject({
     method: 'POST',
     url: '/api/v1/auth/cli/authorize',
-    payload: { redirectUri, codeChallenge, codeChallengeMethod: 'S256', state },
+    payload: { redirectUri, codeChallenge, codeChallengeMethod: 'S256', locale: 'zh-CN', state },
   });
   assert.equal(authorization.statusCode, 200, authorization.body);
   const loginContinuation = new URL(authorization.json().data.authorizationUrl);
   assert.equal(loginContinuation.origin, 'http://localhost:4300');
+  assert.equal(loginContinuation.searchParams.get('locale'), 'zh-CN');
   const requestId = loginContinuation.searchParams.get('cliRequestId');
   assert.match(requestId ?? '', /^[0-9a-f-]{36}$/i);
 

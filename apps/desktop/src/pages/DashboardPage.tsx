@@ -4,9 +4,14 @@ import { IconArrowRight, IconRefresh } from '@arco-design/web-react/icon';
 
 import { apiRequest } from '@/services/apiClient';
 import { desktopHost, isTauriRuntime } from '@/services/desktopHost';
+import { platformLabel, workspaceRoleLabel } from '@/i18n/domain';
+import { formatUiError, normalizeUiError, type UiError } from '@/i18n/errors';
+import { useLocale } from '@/i18n/localeContext';
 import { selectRefreshDesktop, selectSnapshot, useDesktopStore } from '@/stores/desktopStore';
+import type { DesktopPlatform } from '@/types';
 
 export function DashboardPage() {
+  const { formatNumber, t } = useLocale();
   const snapshot = useDesktopStore(selectSnapshot);
   const refresh = useDesktopStore(selectRefreshDesktop);
   const running = snapshot?.tasks.filter((task) => task.status === 'running').length ?? 0;
@@ -17,21 +22,21 @@ export function DashboardPage() {
       <header className="overview-hero">
         <div>
           <div className="hero-meta">
-            <span>01 / HOST STATUS</span>
+            <span>{t('dashboard.meta')}</span>
             <Tag color={isTauriRuntime() ? 'green' : 'orange'}>
-              {isTauriRuntime() ? 'TAURI' : 'BROWSER SIMULATION'}
+              {isTauriRuntime() ? t('dashboard.tauri') : t('dashboard.browserSimulation')}
             </Tag>
           </div>
           <h1>
-            Local work,
+            {t('dashboard.headlineLine1')}
             <br />
-            <em>contained.</em>
+            <em>{t('dashboard.headlineLine2')}</em>
           </h1>
         </div>
-        <div className="host-orbit" aria-label="Agent status">
+        <div className="host-orbit" aria-label={t('dashboard.agentStatus')}>
           <div>
-            <strong>{snapshot?.sync.offline ? 'OFF' : 'ON'}</strong>
-            <small>AGENT</small>
+            <strong>{snapshot?.sync.offline ? t('dashboard.off') : t('dashboard.on')}</strong>
+            <small>{t('dashboard.agent')}</small>
           </div>
           <span />
           <i />
@@ -39,10 +44,10 @@ export function DashboardPage() {
       </header>
 
       <div className="metric-rail">
-        <Metric value={snapshot?.installed.length ?? 0} label="Installed versions" index="A" />
-        <Metric value={running} label="Active runners" index="B" />
-        <Metric value={snapshot?.sync.revision ?? 0} label="Schedule revision" index="C" />
-        <Metric value={failures} label="Failed runs" index="D" danger={failures > 0} />
+        <Metric value={snapshot?.installed.length ?? 0} label={t('dashboard.metrics.installed')} index="A" />
+        <Metric value={running} label={t('dashboard.metrics.runners')} index="B" />
+        <Metric value={snapshot?.sync.revision ?? 0} label={t('dashboard.metrics.revision')} index="C" />
+        <Metric value={failures} label={t('dashboard.metrics.failures')} index="D" danger={failures > 0} />
       </div>
 
       <DeviceEnrollmentPanel
@@ -56,19 +61,32 @@ export function DashboardPage() {
         <article className="surface boundary-map">
           <div className="surface-heading">
             <div>
-              <p>EXECUTION BOUNDARY</p>
-              <h2>Three processes, one narrow contract</h2>
+              <p>{t('dashboard.executionBoundary')}</p>
+              <h2>{t('dashboard.processTitle')}</h2>
             </div>
             <Button icon={<IconRefresh />} type="text" onClick={() => void refresh()}>
-              Refresh
+              {t('common.refresh')}
             </Button>
           </div>
           <div className="process-flow">
-            <ProcessNode number="01" title="Tauri UI" detail="No Node · explicit invoke" />
+            <ProcessNode
+              number="01"
+              title={t('dashboard.processes.tauri')}
+              detail={t('dashboard.processes.tauriDetail')}
+            />
             <IconArrowRight />
-            <ProcessNode number="02" title="User Agent" detail="SQLite · policy · leases" active />
+            <ProcessNode
+              number="02"
+              title={t('dashboard.processes.agent')}
+              detail={t('dashboard.processes.agentDetail')}
+              active
+            />
             <IconArrowRight />
-            <ProcessNode number="03" title="Runner" detail="Minimal env · no token" />
+            <ProcessNode
+              number="03"
+              title={t('dashboard.processes.runner')}
+              detail={t('dashboard.processes.runnerDetail')}
+            />
           </div>
           <div className="contract-line">
             <code>protocolVersion</code>
@@ -85,28 +103,28 @@ export function DashboardPage() {
         <article className="surface trust-score">
           <div className="surface-heading">
             <div>
-              <p>LOCAL POSTURE</p>
-              <h2>Trust controls</h2>
+              <p>{t('dashboard.posture')}</p>
+              <h2>{t('dashboard.trustControls')}</h2>
             </div>
-            <strong>84</strong>
+            <strong>{formatNumber(84)}</strong>
           </div>
           <Progress percent={84} showText={false} color="#c7ff3d" trailColor="#343a31" />
           <ul>
             <li>
-              <span>Signed installation</span>
-              <b>ENFORCED</b>
+              <span>{t('dashboard.controls.signedInstallation')}</span>
+              <b>{t('dashboard.enforced')}</b>
             </li>
             <li>
-              <span>Lease-bound RPC</span>
-              <b>ENFORCED</b>
+              <span>{t('dashboard.controls.leaseBoundRpc')}</span>
+              <b>{t('dashboard.enforced')}</b>
             </li>
             <li>
-              <span>Schedule freshness</span>
-              <b>{snapshot?.sync.offline ? 'OFFLINE' : 'CURRENT'}</b>
+              <span>{t('dashboard.controls.scheduleFreshness')}</span>
+              <b>{snapshot?.sync.offline ? t('dashboard.offline') : t('dashboard.current')}</b>
             </li>
             <li>
-              <span>OS process sandbox</span>
-              <b className="warning">PHASE 2</b>
+              <span>{t('dashboard.controls.processSandbox')}</span>
+              <b className="warning">{t('dashboard.phase2')}</b>
             </li>
           </ul>
         </article>
@@ -125,14 +143,21 @@ function DeviceEnrollmentPanel({
 }: {
   device: { deviceId: string; apiBaseUrl: string } | null;
   installationRevision: number;
-  target?: { os: string; arch: string };
+  target?: DesktopPlatform;
   onEnrolled: () => Promise<void>;
 }) {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [workspaceId, setWorkspaceId] = useState('');
-  const [name, setName] = useState('My desktop');
+  const { formatNumber, t } = useLocale();
+  const defaultDeviceName = t('dashboard.defaultDeviceName');
+  const [name, setName] = useState(defaultDeviceName);
+  const [nameCustomized, setNameCustomized] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<UiError | null>(null);
+
+  useEffect(() => {
+    if (!nameCustomized) setName(defaultDeviceName);
+  }, [defaultDeviceName, nameCustomized]);
 
   useEffect(() => {
     if (device || !isTauriRuntime()) return;
@@ -143,7 +168,7 @@ function DeviceEnrollmentPanel({
         setWorkspaces(values);
         setWorkspaceId(values[0]?.id ?? '');
       })
-      .catch((reason: unknown) => active && setError(String(reason)));
+      .catch((reason: unknown) => active && setError(normalizeUiError(reason, 'api_request_failed')));
     return () => {
       active = false;
     };
@@ -154,19 +179,19 @@ function DeviceEnrollmentPanel({
       <article className="surface enrollment-card">
         <div className="surface-heading">
           <div>
-            <p>DEVICE CONTROL PLANE</p>
-            <h2>Automatic delivery is connected</h2>
+            <p>{t('dashboard.deviceControlPlane')}</p>
+            <h2>{t('dashboard.deliveryConnected')}</h2>
           </div>
-          <Tag color="green">ENROLLED</Tag>
+          <Tag color="green">{t('dashboard.enrolled')}</Tag>
         </div>
         <div className="contract-line">
-          <code>{target ? `${target.os}-${target.arch}` : 'desktop'}</code>
+          <code>{target ? platformLabel(target, t) : t('app.brandSubtitle')}</code>
           <i />
           <code>{device.deviceId}</code>
           <i />
-          <code>INSTALL REV {installationRevision}</code>
+          <code>{t('dashboard.installRevision', { revision: formatNumber(installationRevision) })}</code>
         </div>
-        <small className="muted">Signed releases are downloaded, verified and activated by the Agent.</small>
+        <small className="muted">{t('dashboard.signedDelivery')}</small>
       </article>
     );
   }
@@ -175,27 +200,32 @@ function DeviceEnrollmentPanel({
     <article className="surface enrollment-card">
       <div className="surface-heading">
         <div>
-          <p>DEVICE CONTROL PLANE</p>
-          <h2>Enroll this Agent for automatic delivery</h2>
+          <p>{t('dashboard.deviceControlPlane')}</p>
+          <h2>{t('dashboard.enrollTitle')}</h2>
         </div>
-        <Tag color="orange">ACTION REQUIRED</Tag>
+        <Tag color="orange">{t('dashboard.actionRequired')}</Tag>
       </div>
-      <Alert
-        type="info"
-        content="Enrollment creates a device-scoped credential in the OS credential store. The WebView never receives it."
-      />
-      {error && <Alert type="error" content={error} />}
+      <Alert type="info" content={t('dashboard.enrollDescription')} />
+      {error && <Alert type="error" content={formatUiError(error, t)} />}
       <div className="field-pair">
         <Select
           value={workspaceId || undefined}
-          placeholder="Choose workspace"
+          placeholder={t('dashboard.chooseWorkspace')}
           onChange={setWorkspaceId}
           options={workspaces.map((workspace) => ({
-            label: `${workspace.name} · ${workspace.role}`,
+            label: `${workspace.name} · ${workspaceRoleLabel(workspace.role, t)}`,
             value: workspace.id,
           }))}
         />
-        <Input value={name} maxLength={120} onChange={setName} placeholder="Device name" />
+        <Input
+          value={name}
+          maxLength={120}
+          onChange={(value) => {
+            setNameCustomized(true);
+            setName(value);
+          }}
+          placeholder={t('dashboard.deviceName')}
+        />
       </div>
       <Button
         type="primary"
@@ -207,12 +237,12 @@ function DeviceEnrollmentPanel({
           void desktopHost
             .enrollDevice(workspaceId, name.trim())
             .then(onEnrolled)
-            .then(() => Message.success('Device enrolled'))
-            .catch((reason: unknown) => setError(String(reason)))
+            .then(() => Message.success(t('dashboard.enrolledMessage')))
+            .catch((reason: unknown) => setError(normalizeUiError(reason, 'device_enrollment_failed')))
             .finally(() => setLoading(false));
         }}
       >
-        Enroll device
+        {t('dashboard.enrollDevice')}
       </Button>
     </article>
   );
@@ -229,10 +259,11 @@ function Metric({
   index: string;
   danger?: boolean;
 }) {
+  const { formatNumber } = useLocale();
   return (
     <div className={`metric-cell ${danger ? 'is-danger' : ''}`}>
       <span>{index}</span>
-      <strong>{value.toString().padStart(2, '0')}</strong>
+      <strong>{formatNumber(value, { minimumIntegerDigits: 2, useGrouping: false })}</strong>
       <small>{label}</small>
     </div>
   );

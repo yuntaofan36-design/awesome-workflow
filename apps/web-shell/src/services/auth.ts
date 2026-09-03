@@ -1,7 +1,7 @@
 import type { AuthProvider } from '@awesome-workflow/contracts';
 import type { UserSummary } from '@awesome-workflow/web-sdk';
 
-import { apiRequest } from './http';
+import { ApiError, apiRequest } from './http';
 
 export type { AuthProvider } from '@awesome-workflow/contracts';
 
@@ -18,6 +18,15 @@ export async function getSession(): Promise<UserSummary> {
 
 export async function getProviders(): Promise<AuthProvider[]> {
   return unwrap(await apiRequest<{ data: AuthProvider[] }>('/auth/providers'));
+}
+
+export async function loginWithPassword(email: string, password: string): Promise<UserSummary> {
+  return unwrap(
+    await apiRequest<{ data: UserSummary }>('/auth/password/login', {
+      body: JSON.stringify({ email, password }),
+      method: 'POST',
+    }),
+  );
 }
 
 export async function startEmailChallenge(email: string): Promise<EmailChallenge> {
@@ -40,7 +49,11 @@ export async function verifyEmailChallenge(challengeId: string, code: string): P
 
 export async function beginProviderAuthentication(provider: AuthProvider, returnTo: string): Promise<string> {
   if (provider.protocol !== 'oidc' || provider.status !== 'active') {
-    throw new Error(`${provider.label} is not available for OIDC authentication`);
+    throw new ApiError(
+      `${provider.label} is not available for OIDC authentication`,
+      400,
+      'provider_unavailable',
+    );
   }
   const query = new URLSearchParams({ returnTo });
   if (provider.id !== 'email') query.set('provider', provider.id);

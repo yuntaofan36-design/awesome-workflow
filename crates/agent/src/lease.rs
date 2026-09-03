@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    db::Database, now_unix, AgentError, AgentResult, Capability, RpcEnvelope, RPC_PROTOCOL_VERSION,
+    db::{Database, LeaseRecord},
+    now_unix, AgentError, AgentResult, AuthorizationLease, Capability, RpcEnvelope,
+    RPC_PROTOCOL_VERSION,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,6 +35,34 @@ impl LeaseAuthority {
         capabilities: &[Capability],
         ttl: Duration,
     ) -> AgentResult<IssuedLease> {
+        self.issue_bound(app_id, task_id, capabilities, ttl, None)
+    }
+
+    pub(crate) fn issue_authorized(
+        &self,
+        app_id: &str,
+        task_id: &str,
+        capabilities: &[Capability],
+        ttl: Duration,
+        authorization_lease: &AuthorizationLease,
+    ) -> AgentResult<IssuedLease> {
+        self.issue_bound(
+            app_id,
+            task_id,
+            capabilities,
+            ttl,
+            Some(authorization_lease),
+        )
+    }
+
+    fn issue_bound(
+        &self,
+        app_id: &str,
+        task_id: &str,
+        capabilities: &[Capability],
+        ttl: Duration,
+        authorization_lease: Option<&AuthorizationLease>,
+    ) -> AgentResult<IssuedLease> {
         let mut bytes = [0_u8; 32];
         rand::rng().fill_bytes(&mut bytes);
         let value = URL_SAFE_NO_PAD.encode(bytes);
@@ -43,6 +73,7 @@ impl LeaseAuthority {
             task_id,
             capabilities,
             expires_at,
+            authorization_lease,
         )?;
         Ok(IssuedLease { value, expires_at })
     }
@@ -55,6 +86,13 @@ impl LeaseAuthority {
         &self,
         envelope: &RpcEnvelope<T>,
     ) -> AgentResult<Vec<Capability>> {
+        Ok(self.authorized_record(envelope)?.capabilities)
+    }
+
+    pub(crate) fn authorized_record<T>(
+        &self,
+        envelope: &RpcEnvelope<T>,
+    ) -> AgentResult<LeaseRecord> {
         if envelope.protocol_version != RPC_PROTOCOL_VERSION {
             return Err(AgentError::AccessDenied(
                 "unsupported RPC protocol version".into(),
@@ -75,7 +113,7 @@ impl LeaseAuthority {
                 envelope.method
             )));
         }
-        Ok(lease.capabilities)
+        Ok(lease)
     }
 }
 

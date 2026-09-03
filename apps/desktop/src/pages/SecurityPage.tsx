@@ -1,75 +1,57 @@
 import { Tag } from '@arco-design/web-react';
 
+import { useLocale } from '@/i18n/localeContext';
+
 const controls = [
-  [
-    'Renderer isolation',
-    'Tauri WebView exposes only named commands; shell and filesystem wildcard plugins are absent.',
-    'ENFORCED',
-  ],
-  [
-    'Artifact integrity',
-    'SHA-256 is checked before Ed25519 signature verification and before extraction.',
-    'ENFORCED',
-  ],
-  [
-    'Archive containment',
-    'Absolute paths, parent traversal, symlinks, entry count and expanded size are rejected.',
-    'ENFORCED',
-  ],
-  ['Runtime identity', 'RPC requires protocolVersion + appId + taskId + lease + method.', 'ENFORCED'],
-  [
-    'Credential boundary',
-    'Runner environment is allowlisted; platform cookies and tokens never cross.',
-    'ENFORCED',
-  ],
-  [
-    'OS sandbox',
-    'Native/Python child sandbox profiles require platform-specific phase-two hardening.',
-    'OPEN',
-  ],
+  ['security.controls.rendererTitle', 'security.controls.rendererCopy', 'ENFORCED'],
+  ['security.controls.artifactTitle', 'security.controls.artifactCopy', 'ENFORCED'],
+  ['security.controls.archiveTitle', 'security.controls.archiveCopy', 'ENFORCED'],
+  ['security.controls.identityTitle', 'security.controls.identityCopy', 'ENFORCED'],
+  ['security.controls.credentialTitle', 'security.controls.credentialCopy', 'ENFORCED'],
+  ['security.controls.sandboxTitle', 'security.controls.sandboxCopy', 'OPEN'],
 ] as const;
 
 export function SecurityPage() {
+  const { t } = useLocale();
   return (
     <section className="page-stack">
       <header className="page-lead">
         <div>
           <span>06</span>
-          <p>FAIL-CLOSED BOUNDARIES</p>
+          <p>{t('security.eyebrow')}</p>
         </div>
-        <h1>Trust center</h1>
-        <p>
-          A manifest requests capability; it does not grant capability. Trust is raised only by policy,
-          signature, user approval and a short-lived task lease.
-        </p>
+        <h1>{t('security.title')}</h1>
+        <p>{t('security.description')}</p>
       </header>
       <div className="security-grid">
-        {controls.map(([title, copy, state], index) => (
-          <article className="security-control" key={title}>
+        {controls.map(([titleKey, copyKey, state], index) => (
+          <article className="security-control" key={titleKey}>
             <span>{String(index + 1).padStart(2, '0')}</span>
             <div>
-              <h3>{title}</h3>
-              <p>{copy}</p>
+              <h3>{t(titleKey)}</h3>
+              <p>{t(copyKey)}</p>
             </div>
-            <Tag color={state === 'ENFORCED' ? 'green' : 'orange'}>{state}</Tag>
+            <Tag color={state === 'ENFORCED' ? 'green' : 'orange'}>
+              {state === 'ENFORCED' ? t('security.enforced') : t('security.open')}
+            </Tag>
           </article>
         ))}
       </div>
       <article className="surface deny-card">
         <div>
-          <p>DEFAULT POLICY</p>
-          <h2>Anything not named is denied.</h2>
+          <p>{t('security.defaultPolicy')}</p>
+          <h2>{t('security.denyTitle')}</h2>
         </div>
         <code>
-          unknown method → deny
+          {t('security.denyUnknownMethod')}
           <br />
-          unknown capability → deny
+          {t('security.denyUnknownCapability')}
           <br />
-          expired lease → deny
+          {t('security.denyExpiredLease')}
           <br />
-          missing signing key → deny
+          {t('security.denyMissingKey')}
           <br />
-          unsupported target → deny
+          {t('security.denyUnsupportedTarget')}
         </code>
       </article>
     </section>

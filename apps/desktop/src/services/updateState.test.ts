@@ -41,9 +41,15 @@ test('unknown content length stays indeterminate and failures are explicit', () 
     type: 'download-started',
   });
   assert.equal(updateProgressPercent(state), null);
-  state = reduceDesktopUpdate(state, { type: 'failed', error: 'signature rejected' });
+  state = reduceDesktopUpdate(state, {
+    type: 'failed',
+    error: { code: 'updater_install_failed', diagnostic: 'signature rejected' },
+  });
   assert.deepEqual(
     { phase: state.phase, error: state.error },
-    { phase: 'error', error: 'signature rejected' },
+    {
+      phase: 'error',
+      error: { code: 'updater_install_failed', diagnostic: 'signature rejected' },
+    },
   );
 });

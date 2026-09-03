@@ -1,0 +1,115 @@
+name: l3-acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_real_tauri_process_gate:
+        description: Run the GUI/Agent-survival gate on interactive self-hosted machines
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: l3-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  web-federation-csp:
+    name: Federation CSP in Chromium
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.0.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install Chromium and system dependencies
+        run: pnpm --filter @awesome-workflow/web-shell exec playwright install --with-deps chromium
+      - name: Verify Federation policy and browser-enforced CSP
+        run: pnpm test:l3:web-csp
+
+  infrastructure:
+    name: Compose services and host TCP API/BullMQ Worker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.0.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run isolated infrastructure L3
+        shell: pwsh
+        run: ./scripts/l3.ps1 -InfrastructureOnly
+
+  desktop-preflight:
+    name: Desktop headless preflight (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            label: windows-x64
+          - runner: macos-14
+            label: macos-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.0.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: pnpm install --frozen-lockfile
+      - name: Run headless preflight (not GUI L3 evidence)
+        shell: pwsh
+        run: ./scripts/l3.ps1 -DesktopOnly
+
+  tauri-process-gate:
+    name: Tauri process gate (${{ matrix.label }})
+    if: ${{ inputs.run_real_tauri_process_gate }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: '["self-hosted","Windows","X64","awesome-workflow-l3-interactive"]'
+            label: windows-x64
+          - runner: '["self-hosted","macOS","ARM64","awesome-workflow-l3-interactive"]'
+            label: macos-arm64
+    runs-on: ${{ fromJSON(matrix.runner) }}
+    environment: l3-interactive-desktop
+    timeout-minutes: 45
+    env:
+      AW_L3_INTERACTIVE_DESKTOP: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.0.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: pnpm install --frozen-lockfile
+      - name: Launch real Tauri UI and verify Agent survival
+        shell: pwsh
+        run: ./scripts/l3.ps1 -DesktopOnly -TauriProcessSmoke

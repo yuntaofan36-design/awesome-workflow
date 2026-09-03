@@ -22,6 +22,8 @@ const taskContext: DesktopTaskContext = {
   lease: 'lease-value-that-is-long-enough-and-stays-local',
   rpcEndpoint: WEB_UI_RPC_PATH,
   workDirectory: String.raw`C:\tasks\task-1`,
+  locale: 'zh-CN',
+  fallbackLocales: ['en-US'],
 };
 
 test('fragment bootstrap is strict, scrubbed before parsing, and one-time', () => {
@@ -58,6 +60,8 @@ test('Web UI client posts a task-bound envelope only to the fixed loopback RPC p
         taskId: taskContext.taskId,
         workDirectory: taskContext.workDirectory,
         arguments: ['--trigger', 'schedule'],
+        locale: taskContext.locale,
+        fallbackLocales: taskContext.fallbackLocales,
       },
     });
   };
@@ -66,6 +70,7 @@ test('Web UI client posts a task-bound envelope only to the fixed loopback RPC p
   const hostContext = await client.readContext();
   assert.equal(hostContext.taskId, taskContext.taskId);
   assert.deepEqual(hostContext.arguments, ['--trigger', 'schedule']);
+  assert.equal(hostContext.locale, 'zh-CN');
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.url, `http://127.0.0.1:43127${WEB_UI_RPC_PATH}`);
   assert.equal(calls[0]?.init?.method, 'POST');

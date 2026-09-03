@@ -8,6 +8,8 @@ import type { AuthRateLimitPort } from './auth.port.js';
 const WINDOW_SECONDS = 15 * 60;
 const EMAIL_LIMIT = 5;
 const IP_LIMIT = 20;
+const PASSWORD_EMAIL_LIMIT = 5;
+const PASSWORD_IP_LIMIT = 20;
 const PUBLIC_TOKEN_EXCHANGE_LIMIT = 30;
 
 type Bucket = { count: number; resetsAt: number };
@@ -19,6 +21,11 @@ export class MemoryAuthRateLimitAdapter implements AuthRateLimitPort {
   async consumeEmailChallenge(input: { email: string; clientIp: string; now: Date }): Promise<void> {
     this.consume(`email:${digest(input.email)}`, EMAIL_LIMIT, input.now.getTime());
     this.consume(`ip:${digest(input.clientIp)}`, IP_LIMIT, input.now.getTime());
+  }
+
+  async consumePasswordLogin(input: { email: string; clientIp: string; now: Date }): Promise<void> {
+    this.consume(`password-email:${digest(input.email)}`, PASSWORD_EMAIL_LIMIT, input.now.getTime());
+    this.consume(`password-ip:${digest(input.clientIp)}`, PASSWORD_IP_LIMIT, input.now.getTime());
   }
 
   async consumePublicTokenExchange(input: { clientIp: string; now: Date }): Promise<void> {
@@ -59,6 +66,22 @@ export class RedisAuthRateLimitAdapter implements AuthRateLimitPort, OnModuleDes
     const result = await this.redis.eval(REDIS_LIMIT_SCRIPT, {
       keys,
       arguments: [String(EMAIL_LIMIT), String(IP_LIMIT), String(WINDOW_SECONDS)],
+    });
+    const retryAfterSeconds = Number(result);
+    if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+      throw new DomainError(429, 'auth_rate_limited', 'Too many authentication attempts', {
+        retryAfterSeconds,
+      });
+    }
+  }
+
+  async consumePasswordLogin(input: { email: string; clientIp: string; now: Date }): Promise<void> {
+    const result = await this.redis.eval(REDIS_LIMIT_SCRIPT, {
+      keys: [
+        `${this.prefix}:password-email:${digest(input.email)}`,
+        `${this.prefix}:password-ip:${digest(input.clientIp)}`,
+      ],
+      arguments: [String(PASSWORD_EMAIL_LIMIT), String(PASSWORD_IP_LIMIT), String(WINDOW_SECONDS)],
     });
     const retryAfterSeconds = Number(result);
     if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {

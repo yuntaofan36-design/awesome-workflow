@@ -3,7 +3,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 
-import type { AuthProvider, AuthProviderId } from '@awesome-workflow/contracts';
+import type { AuthProvider, SocialAuthProviderId, SupportedLocale } from '@awesome-workflow/contracts';
 import { CONFIG, type PlatformConfig } from '@awesome-workflow/config';
 
 import { DomainError, invalidState } from '../../core/errors.js';
@@ -32,6 +32,7 @@ export class LogtoOidcAdapter implements OidcAuthorityPort {
       {
         id: 'email',
         label: 'Email verification code',
+        labelKey: 'auth.provider.email',
         protocol: 'oidc',
         status: 'active',
         strategy: 'oidc_broker',
@@ -44,8 +45,9 @@ export class LogtoOidcAdapter implements OidcAuthorityPort {
   }
 
   async begin(input: {
-    provider?: Exclude<AuthProviderId, 'email'>;
+    provider?: SocialAuthProviderId;
     returnTo?: string;
+    uiLocales?: SupportedLocale;
   }): Promise<{ authorizationUrl: string }> {
     if (input.provider && !this.config.oidcEnabledProviders.has(input.provider)) {
       throw new DomainError(404, 'social_provider_disabled', 'The requested social provider is not enabled');
@@ -75,6 +77,7 @@ export class LogtoOidcAdapter implements OidcAuthorityPort {
     url.searchParams.set('code_challenge_method', 'S256');
     url.searchParams.set('code_challenge', hashBase64Url(codeVerifier));
     if (input.provider) url.searchParams.set('direct_sign_in', `social:${input.provider}`);
+    if (input.uiLocales) url.searchParams.set('ui_locales', input.uiLocales);
     return { authorizationUrl: url.toString() };
   }
 
@@ -125,15 +128,12 @@ export class LogtoOidcAdapter implements OidcAuthorityPort {
     };
   }
 
-  private socialProvider(
-    id: Exclude<AuthProviderId, 'email'>,
-    label: string,
-    authorizeUrl: string,
-  ): AuthProvider {
+  private socialProvider(id: SocialAuthProviderId, label: string, authorizeUrl: string): AuthProvider {
     const enabled = this.config.oidcEnabledProviders.has(id);
     return {
       id,
       label,
+      labelKey: `auth.provider.${id}`,
       protocol: 'oidc',
       status: enabled ? 'active' : 'disabled',
       strategy: 'oidc_broker',

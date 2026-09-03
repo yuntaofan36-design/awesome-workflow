@@ -1,7 +1,7 @@
 import { createHash, randomUUID, verify } from 'node:crypto';
 import { mkdtemp, open, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 
 import yauzl, { type Entry, type ZipFile } from 'yauzl';
 
@@ -10,7 +10,13 @@ import type {
   ReleaseValidationResult,
   ValidationEvidence,
 } from '@awesome-workflow/contracts';
-import { canonicalizeManifestForSignature, ReleaseManifestSchema } from '@awesome-workflow/manifest-schema';
+import {
+  assertContentAddressedFederationManifestUrl,
+  assertFederationWebPolicy,
+  canonicalizeManifestForSignature,
+  ReleaseManifestSchema,
+  type ReleaseManifest,
+} from '@awesome-workflow/manifest-schema';
 
 import type { WorkerConfig } from './config.js';
 
@@ -21,37 +27,58 @@ export async function validateRelease(
   config: WorkerConfig,
 ): Promise<ReleaseValidationResult> {
   const releaseEvidence: ValidationEvidence[] = [];
+  let manifest: ReleaseManifest;
   try {
-    ReleaseManifestSchema.parse(job.manifest);
+    manifest = ReleaseManifestSchema.parse(job.manifest);
     releaseEvidence.push(evidence('manifest', 'passed'));
+  } catch (error) {
+    const check = isFederationCspSchemaError(job.manifest, error) ? 'csp' : 'manifest';
+    releaseEvidence.push(evidence(check, 'failed', { reason: safeMessage(error) }));
+    return rejectedRelease(job, releaseEvidence, 'Release manifest validation failed');
+  }
+
+  if (manifest.kind === 'web' && manifest.runtime === 'federation') {
+    try {
+      assertFederationWebPolicy(manifest);
+      assertContentAddressedFederationManifestUrl(manifest.manifestUrl, manifest.integritySha256);
+      releaseEvidence.push(
+        evidence('csp', 'passed', {
+          manifestOrigin: new URL(manifest.manifestUrl).origin,
+          resourceOrigins: manifest.resourceOrigins,
+        }),
+      );
+    } catch (error) {
+      releaseEvidence.push(evidence('csp', 'failed', { reason: safeMessage(error) }));
+      return rejectedRelease(job, releaseEvidence, 'Federation security policy validation failed');
+    }
+  }
+
+  try {
     assertArtifactSetMatchesManifest(job);
     releaseEvidence.push(evidence('manifest', 'passed', { artifactSet: 'matched' }));
     verifyPublisherSignature(
-      Buffer.from(canonicalizeManifestForSignature(job.manifest), 'utf8'),
-      job.manifest.signature,
+      Buffer.from(canonicalizeManifestForSignature(manifest), 'utf8'),
+      manifest.signature,
       config.signingKeys,
     );
-    releaseEvidence.push(evidence('signature', 'passed', { keyId: job.manifest.signature.keyId }));
+    releaseEvidence.push(evidence('signature', 'passed', { keyId: manifest.signature.keyId }));
   } catch (error) {
     releaseEvidence.push(evidence('manifest', 'failed', { reason: safeMessage(error) }));
-    return {
-      releaseId: job.releaseId,
-      success: false,
-      artifactResults: job.artifacts.map((artifact) => ({
-        artifactId: artifact.artifactId,
-        success: false,
-        error: 'Release manifest validation failed',
-        evidence: [],
-      })),
-      releaseEvidence,
-    };
+    return rejectedRelease(job, releaseEvidence, 'Release manifest validation failed');
   }
 
   const validationRoot = await mkdtemp(join(tmpdir(), 'awesome-workflow-validation-'));
   try {
     const artifactResults = [];
+    const federationEntry =
+      manifest.kind === 'web' && manifest.runtime === 'federation'
+        ? {
+            fileName: posix.basename(new URL(manifest.manifestUrl).pathname),
+            sha256: manifest.integritySha256,
+          }
+        : undefined;
     for (const artifact of job.artifacts) {
-      artifactResults.push(await validateArtifact(artifact, validationRoot, config));
+      artifactResults.push(await validateArtifact(artifact, validationRoot, config, federationEntry));
     }
     return {
       releaseId: job.releaseId,
@@ -71,6 +98,7 @@ async function validateArtifact(
   artifact: ArtifactJob,
   validationRoot: string,
   config: WorkerConfig,
+  federationEntry?: { fileName: string; sha256: string },
 ): Promise<ArtifactResult> {
   const checks: ValidationEvidence[] = [];
   let actualSha256: string | undefined;
@@ -114,7 +142,25 @@ async function validateArtifact(
         maxFiles: config.ARTIFACT_MAX_FILES,
       });
       checks.push(evidence('archive', 'passed', summary));
+      if (federationEntry) {
+        const manifestEntry = await hashUniqueArchiveEntry(downloaded.path, federationEntry.fileName);
+        if (manifestEntry.sha256 !== federationEntry.sha256) {
+          throw new ValidationError(
+            'digest',
+            'Federation manifest SHA-256 differs from the signed runtime declaration',
+          );
+        }
+        checks.push(
+          evidence('digest', 'passed', {
+            federationManifest: manifestEntry.entryName,
+            sha256: manifestEntry.sha256,
+          }),
+        );
+      }
     } else {
+      if (federationEntry) {
+        throw new ValidationError('archive', 'Federation releases require a ZIP web bundle');
+      }
       checks.push(evidence('archive', 'passed', { inspected: false, reason: 'not-a-zip-artifact' }));
     }
 
@@ -139,8 +185,84 @@ async function validateArtifact(
   }
 }
 
+export async function hashUniqueArchiveEntry(
+  path: string,
+  expectedFileName: string,
+): Promise<{ entryName: string; sha256: string }> {
+  if (!expectedFileName || expectedFileName.includes('/') || expectedFileName.includes('\\')) {
+    throw new ValidationError('digest', 'Federation manifest entry name is invalid');
+  }
+  return new Promise((resolve, reject) => {
+    yauzl.open(path, { autoClose: true, lazyEntries: true, validateEntrySizes: true }, (error, archive) => {
+      if (error || !archive) {
+        reject(new ValidationError('archive', error?.message ?? 'Unable to open Federation bundle'));
+        return;
+      }
+      let match: { entryName: string; sha256: string } | undefined;
+      let settled = false;
+      const fail = (reason: unknown) => {
+        if (settled) return;
+        settled = true;
+        archive.close();
+        reject(reason);
+      };
+      archive.on('entry', (entry: Entry) => {
+        try {
+          assertSafeArchivePath(entry.fileName);
+          const isMatch =
+            entry.fileName === expectedFileName || entry.fileName.endsWith(`/${expectedFileName}`);
+          if (!isMatch) {
+            archive.readEntry();
+            return;
+          }
+          if (match) {
+            fail(new ValidationError('digest', 'Federation bundle contains multiple manifest entries'));
+            return;
+          }
+          archive.openReadStream(entry, (streamError, stream) => {
+            if (streamError || !stream) {
+              fail(
+                new ValidationError(
+                  'digest',
+                  streamError?.message ?? 'Unable to read Federation manifest entry',
+                ),
+              );
+              return;
+            }
+            const hash = createHash('sha256');
+            stream.on('data', (chunk: Buffer) => hash.update(chunk));
+            stream.once('error', (streamFailure) =>
+              fail(new ValidationError('digest', streamFailure.message)),
+            );
+            stream.once('end', () => {
+              match = { entryName: entry.fileName, sha256: hash.digest('hex') };
+              archive.readEntry();
+            });
+          });
+        } catch (entryError) {
+          fail(entryError);
+        }
+      });
+      archive.once('end', () => {
+        if (settled) return;
+        settled = true;
+        if (!match) {
+          reject(new ValidationError('digest', 'Federation bundle is missing its declared manifest entry'));
+          return;
+        }
+        resolve(match);
+      });
+      archive.once('error', (archiveError) => fail(new ValidationError('archive', archiveError.message)));
+      archive.readEntry();
+    });
+  });
+}
+
 function assertArtifactSetMatchesManifest(job: ReleaseValidationJob): void {
   const declared = job.manifest.artifacts;
+  if (job.manifest.kind === 'web' && job.manifest.runtime === 'federation' && declared.length !== 1) {
+    throw new Error('Federation releases require exactly one immutable web bundle artifact');
+  }
   if (declared.length !== job.artifacts.length) {
     throw new Error('Manifest artifacts and uploaded artifacts differ in count');
   }
@@ -327,6 +449,34 @@ function readSbomUrl(value: unknown): string {
     throw new ValidationError('sbom', 'SBOM object URL is missing from the validation job');
   }
   return value.url;
+}
+
+function rejectedRelease(
+  job: ReleaseValidationJob,
+  releaseEvidence: ValidationEvidence[],
+  error: string,
+): ReleaseValidationResult {
+  return {
+    releaseId: job.releaseId,
+    success: false,
+    artifactResults: job.artifacts.map((artifact) => ({
+      artifactId: artifact.artifactId,
+      success: false,
+      error,
+      evidence: [],
+    })),
+    releaseEvidence,
+  };
+}
+
+function isFederationCspSchemaError(manifest: unknown, error: unknown): boolean {
+  if (!isRecord(manifest) || manifest.kind !== 'web' || manifest.runtime !== 'federation') return false;
+  if (!isRecord(error) || !Array.isArray(error.issues)) return false;
+  return error.issues.some((issue) => {
+    if (!isRecord(issue) || !Array.isArray(issue.path)) return false;
+    const root = issue.path[0];
+    return root === 'resourceOrigins' || root === 'manifestUrl' || root === 'contentSecurityPolicy';
+  });
 }
 
 function evidence(
