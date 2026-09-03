@@ -36,6 +36,7 @@ export const desktopResources = {
         updates: 'Desktop updates',
       },
       common: {
+        loading: 'Loading…',
         refresh: 'Refresh',
         browse: 'Browse',
         run: 'Run',
@@ -453,6 +454,7 @@ export const desktopResources = {
         updates: '桌面更新',
       },
       common: {
+        loading: '加载中…',
         refresh: '刷新',
         browse: '浏览',
         run: '运行',

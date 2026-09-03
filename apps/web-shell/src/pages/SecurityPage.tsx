@@ -3,6 +3,10 @@ import { IconEmail, IconLock, IconSafe } from '@arco-design/web-react/icon';
 import { SectionIntro, SignalBadge } from '@awesome-workflow/ui';
 import { useQuery } from '@tanstack/react-query';
 
+import '@arco-design/web-react/es/Card/style/css.js';
+import '@arco-design/web-react/es/Select/style/css.js';
+import '@arco-design/web-react/es/Skeleton/style/css.js';
+
 import { getProviders } from '../services/auth';
 import { LocalizedErrorAlert } from '../components/LocalizedErrorAlert';
 import { useI18n } from '../i18n/I18nProvider';

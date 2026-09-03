@@ -5,6 +5,11 @@ import type { LocalePreference } from '@awesome-workflow/contracts';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
+import '@arco-design/web-react/es/Form/style/css.js';
+import '@arco-design/web-react/es/Input/style/css.js';
+import '@arco-design/web-react/es/Message/style/css.js';
+import '@arco-design/web-react/es/Select/style/css.js';
+
 import {
   beginProviderAuthentication,
   getProviders,

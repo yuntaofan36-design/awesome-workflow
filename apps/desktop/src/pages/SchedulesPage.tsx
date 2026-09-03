@@ -1,5 +1,8 @@
 import { Alert, Progress, Tag } from '@arco-design/web-react';
 
+import '@arco-design/web-react/es/Progress/style/css.js';
+import '@arco-design/web-react/es/Tag/style/css.js';
+
 import { useLocale } from '@/i18n/localeContext';
 import { selectSnapshot, useDesktopStore } from '@/stores/desktopStore';
 

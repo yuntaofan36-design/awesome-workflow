@@ -1,5 +1,4 @@
 import { invoke } from '@tauri-apps/api/core';
-import { open } from '@tauri-apps/plugin-dialog';
 
 import type { AgentSnapshot, AppletManifest, EnrolledDevice, RunAppletResult } from '@/types';
 import { getDesktopRequestLocale } from '../i18n/requestLocale';
@@ -87,6 +86,8 @@ export function isTauriRuntime() {
   return '__TAURI_INTERNALS__' in window;
 }
 
+const loadDialog = () => import('@tauri-apps/plugin-dialog');
+
 export const desktopHost = {
   snapshot: async () =>
     isTauriRuntime() ? invoke<AgentSnapshot>('agent_snapshot') : structuredClone(browserSnapshot),
@@ -138,11 +139,13 @@ export const desktopHost = {
       : Promise.resolve('[runner] starting hello-runner\nprogress 100%\n[runner] exit status 0'),
   chooseDirectory: async (title: string) => {
     if (!isTauriRuntime()) return 'C:\\dev\\hello-runner';
+    const { open } = await loadDialog();
     const selected = await open({ directory: true, multiple: false, title });
     return selected ?? null;
   },
   choosePackage: async (title: string, filterName: string) => {
     if (!isTauriRuntime()) return 'C:\\dist\\hello-runner-0.1.0.awpkg';
+    const { open } = await loadDialog();
     const selected = await open({
       directory: false,
       multiple: false,

@@ -2,6 +2,11 @@ import { useState } from 'react';
 import { Button, Drawer, Empty, Message, Table, Tag } from '@arco-design/web-react';
 import { IconEye, IconStop } from '@arco-design/web-react/icon';
 
+import '@arco-design/web-react/es/Drawer/style/css.js';
+import '@arco-design/web-react/es/Empty/style/css.js';
+import '@arco-design/web-react/es/Table/style/css.js';
+import '@arco-design/web-react/es/Tag/style/css.js';
+
 import { desktopHost } from '@/services/desktopHost';
 import { taskStatusLabel } from '@/i18n/domain';
 import { formatUiError, normalizeUiError } from '@/i18n/errors';

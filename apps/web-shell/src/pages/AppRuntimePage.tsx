@@ -4,6 +4,9 @@ import { SignalBadge, StatePanel } from '@awesome-workflow/ui';
 import { useRef } from 'react';
 import { useNavigate, useOutletContext, useParams } from 'react-router-dom';
 
+import '@arco-design/web-react/es/Message/style/css.js';
+import '@arco-design/web-react/es/Skeleton/style/css.js';
+
 import type { ShellOutletContext } from '../components/ShellLayout';
 import { LocalizedErrorAlert } from '../components/LocalizedErrorAlert';
 import { useI18n } from '../i18n/I18nProvider';

@@ -63,6 +63,78 @@
   letter-spacing: 0.2em;
 }
 
+.cp-runtime-error {
+  display: grid;
+  min-height: 420px;
+  padding: clamp(30px, 7vw, 90px);
+  place-items: center;
+  color: var(--aw-ink);
+  background: var(--aw-canvas);
+}
+.cp-runtime-error__panel {
+  width: min(640px, 100%);
+  padding: clamp(26px, 5vw, 52px);
+  border: 1px solid var(--aw-line);
+  background: var(--aw-panel);
+  box-shadow: 7px 7px 0 var(--aw-accent);
+}
+.cp-runtime-error__eyebrow {
+  color: var(--aw-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+}
+.cp-runtime-error h1 {
+  margin: 14px 0 10px;
+  font: 500 clamp(24px, 4vw, 38px) / 1.1 var(--aw-font-display);
+}
+.cp-runtime-error p {
+  max-width: 560px;
+  margin: 0;
+  color: var(--aw-muted);
+  line-height: 1.7;
+}
+.cp-runtime-error__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 26px;
+}
+.cp-runtime-error__actions button {
+  min-height: 40px;
+  padding: 0 18px;
+  border: 1px solid var(--aw-ink);
+  border-radius: 0;
+  font: 650 12px var(--aw-font-body);
+  cursor: pointer;
+}
+.cp-runtime-error__primary {
+  color: var(--aw-panel);
+  background: var(--aw-ink);
+}
+.cp-runtime-error__secondary {
+  color: var(--aw-ink);
+  background: transparent;
+}
+.cp-runtime-error__actions button:focus-visible {
+  outline: 3px solid var(--aw-accent);
+  outline-offset: 2px;
+}
+.cp-runtime-error details {
+  margin-top: 24px;
+  color: var(--aw-muted);
+}
+.cp-runtime-error summary {
+  cursor: pointer;
+  font-size: 11px;
+}
+.cp-runtime-error code {
+  display: block;
+  margin-top: 10px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .cp-frame {
   display: grid;
   min-height: 720px;
@@ -179,6 +251,10 @@
 }
 .cp-content {
   padding: clamp(28px, 5vw, 64px) clamp(20px, 4vw, 52px) 64px;
+}
+.cp-route-pending {
+  min-height: 360px;
+  padding-top: 8px;
 }
 
 .cp-metrics {

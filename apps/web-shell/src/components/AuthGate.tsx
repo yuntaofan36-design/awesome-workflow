@@ -1,11 +1,15 @@
 import { Button, Spin } from '@arco-design/web-react';
-import { useEffect, type PropsWithChildren } from 'react';
+import { lazy, Suspense, useEffect, type PropsWithChildren } from 'react';
 
 import { selectInitializeUser, selectUserError, selectUserStatus, useUserStore } from '../stores/userStore';
 import { apiUrl } from '../services/http';
 import { useI18n } from '../i18n/I18nProvider';
 import { LocalizedErrorAlert } from './LocalizedErrorAlert';
-import { LoginScreen } from './LoginScreen';
+
+const LoginScreen = lazy(async () => {
+  const module = await import('./LoginScreen');
+  return { default: module.LoginScreen };
+});
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -46,7 +50,19 @@ export function AuthGate({ children }: PropsWithChildren) {
       </div>
     );
   }
-  if (status === 'anonymous') return <LoginScreen />;
+  if (status === 'anonymous') {
+    return (
+      <Suspense
+        fallback={
+          <div className="auth-boot">
+            <Spin dot tip={t('auth.boot.sessionWorking')} />
+          </div>
+        }
+      >
+        <LoginScreen />
+      </Suspense>
+    );
+  }
   if (cliRequestId && UUID_PATTERN.test(cliRequestId)) {
     return (
       <div className="auth-boot">

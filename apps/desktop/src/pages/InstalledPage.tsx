@@ -1,6 +1,9 @@
 import { Button, Empty, Message, Tag } from '@arco-design/web-react';
 import { IconDelete, IconPlayArrow } from '@arco-design/web-react/icon';
 
+import '@arco-design/web-react/es/Empty/style/css.js';
+import '@arco-design/web-react/es/Tag/style/css.js';
+
 import { desktopHost } from '@/services/desktopHost';
 import { capabilityLabel, platformLabel, runModeLabel, runtimeLabel } from '@/i18n/domain';
 import { formatUiError, normalizeUiError } from '@/i18n/errors';

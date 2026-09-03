@@ -1,5 +1,4 @@
 @import 'tailwindcss';
-@import '@arco-design/web-react/dist/css/arco.css';
 @import '@awesome-workflow/ui/theme.css';
 
 :lang(zh-CN) {
@@ -27,6 +26,71 @@ button,
 input,
 textarea {
   font: inherit;
+}
+
+.async-failure {
+  display: grid;
+  min-height: 100vh;
+  padding: clamp(24px, 6vw, 80px);
+  place-items: center;
+  color: var(--aw-ink);
+  background: var(--aw-canvas);
+}
+.async-failure__panel {
+  width: min(100%, 680px);
+  padding: clamp(24px, 5vw, 52px);
+  border: 1px solid var(--aw-line);
+  background: var(--aw-panel);
+  box-shadow: 12px 12px 0 color-mix(in srgb, var(--aw-line) 62%, transparent);
+}
+.async-failure__eyebrow {
+  color: var(--aw-accent);
+  font-family: var(--aw-font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+.async-failure h1 {
+  max-width: 16ch;
+  margin: 16px 0;
+  font-family: var(--aw-font-display);
+  font-size: clamp(2rem, 6vw, 4.75rem);
+  line-height: 0.95;
+}
+.async-failure p {
+  max-width: 58ch;
+  color: var(--aw-muted);
+  line-height: 1.65;
+}
+.async-failure__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 28px;
+}
+.async-failure__actions button {
+  min-height: 42px;
+  padding: 0 18px;
+  border: 1px solid var(--aw-ink);
+  cursor: pointer;
+}
+.async-failure__primary {
+  color: var(--aw-panel);
+  background: var(--aw-ink);
+}
+.async-failure__secondary {
+  color: var(--aw-ink);
+  background: transparent;
+}
+.async-failure details {
+  margin-top: 24px;
+  color: var(--aw-muted);
+}
+.async-failure code {
+  display: block;
+  overflow-wrap: anywhere;
+  margin-top: 10px;
+  font-family: var(--aw-font-mono);
 }
 
 .shell-root {

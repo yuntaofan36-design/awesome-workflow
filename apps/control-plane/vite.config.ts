@@ -9,6 +9,20 @@ const crossOriginRemoteHeaders = {
   'X-Content-Type-Options': 'nosniff',
 };
 
+function controlPlaneVendorChunk(id: string): string | undefined {
+  const moduleId = id.replaceAll('\\', '/');
+  if (!moduleId.includes('/node_modules/')) return undefined;
+
+  // React and react-dom stay under Module Federation's singleton ownership.
+  if (moduleId.includes('/@tanstack/')) return 'vendor-query';
+  if (moduleId.includes('/react-router-dom/') || moduleId.includes('/react-router/')) {
+    return 'vendor-router';
+  }
+  if (moduleId.includes('/i18next/')) return 'vendor-i18n';
+  if (moduleId.includes('/zod/')) return 'vendor-schema';
+  return undefined;
+}
+
 export default defineConfig({
   plugins: [
     react(),
@@ -27,7 +41,10 @@ export default defineConfig({
     }),
   ],
   build: {
-    cssCodeSplit: false,
+    cssCodeSplit: true,
+    rollupOptions: {
+      output: { manualChunks: controlPlaneVendorChunk },
+    },
     target: 'es2022',
   },
   server: {

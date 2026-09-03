@@ -81,6 +81,22 @@ processes). Changing the UI language never changes a task already running.
 Protocol enums, Manifest keys, signature inputs, audit actions, and CLI JSON
 remain locale-independent.
 
+## Frontend bundle boundaries
+
+Web Shell separates session probing, login, the authenticated shell, routed
+pages, and each micro-frontend runtime. Desktop follows the same pattern and
+loads Tauri dialog/updater capabilities only when invoked. Control Plane keeps
+its Federation bootstrap small, then loads its UI, routes, and registration
+modal independently. Arco styles are imported by the branch that uses them
+rather than through the full distribution stylesheet.
+
+`pnpm build` generates Vite manifests and enforces both synchronous-entry and
+maximum-asset budgets. `pnpm check:bundles` first rebuilds the three frontends,
+so it cannot pass by reading stale output; `pnpm report:bundles` only inspects
+the existing output. The budget also verifies that login/shell,
+desktop capability, Federation runtime, and Control Plane route boundaries do
+not drift back into their parent entry.
+
 ## Core invariants
 
 - A release is immutable. Publish and rollback only move `dev`, `canary`, or

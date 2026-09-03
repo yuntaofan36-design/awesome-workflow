@@ -88,6 +88,19 @@ Web 示例应用和 Tauri 管理界面均支持明确选择语言或跟随系统
 `AW_LOCALE` 与 `AW_FALLBACK_LOCALES`。UI 后续切换语言不会改变正在运行的任务。
 协议枚举、Manifest 字段、签名输入、审计 action 和 CLI JSON 始终与语言无关。
 
+## 前端拆包边界
+
+Web Shell 将 Session 探测、登录页、认证后 Shell、路由页面和三类微前端运行时
+分别加载。Desktop 使用相同策略，并且只在实际操作时加载 Tauri 文件选择和更新
+能力。Control Plane 保持轻量 Federation 引导层，再独立加载 UI Runtime、各路由
+和注册应用弹窗。Arco 样式由实际使用它的运行分支加载，不再引入完整发行版样式。
+
+`pnpm build` 会生成 Vite Manifest，并检查同步入口和最大单资源体积预算。
+`pnpm check:bundles` 会先重建三个前端，避免旧产物造成假通过；
+`pnpm report:bundles` 只读查看现有产物的 raw/gzip 体积。预算还会校验登录与 Shell、桌面
+能力、Federation Runtime、Control Plane 页面等异步边界，防止后续依赖升级把它们
+重新合并进父入口。
+
 ## 核心不变量
 
 - 发布版本不可变。发布与回滚操作只在事务中移动 `dev`、`canary` 或 `stable` 通道指针。

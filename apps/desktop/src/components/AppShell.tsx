@@ -25,6 +25,8 @@ import {
   IconSafe,
 } from '@arco-design/web-react/icon';
 
+import '@/styles/arco-app-shell';
+
 import {
   selectDesktopLoading,
   selectDesktopError,

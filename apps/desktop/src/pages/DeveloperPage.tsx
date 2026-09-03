@@ -2,6 +2,10 @@ import { useState } from 'react';
 import { Alert, Button, Input, Message, Steps, Tag } from '@arco-design/web-react';
 import { IconFile, IconFolder, IconSend } from '@arco-design/web-react/icon';
 
+import '@arco-design/web-react/es/Input/style/css.js';
+import '@arco-design/web-react/es/Steps/style/css.js';
+import '@arco-design/web-react/es/Tag/style/css.js';
+
 import { desktopHost } from '@/services/desktopHost';
 import { capabilityLabel, platformLabel, runtimeLabel } from '@/i18n/domain';
 import { formatUiError, normalizeUiError } from '@/i18n/errors';

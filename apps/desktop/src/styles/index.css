@@ -52,6 +52,17 @@ button {
   text-transform: uppercase;
   font-size: 12px;
 }
+.route-loading {
+  min-height: 40vh;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 14px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
 .login-screen {
   min-height: 100vh;
   display: grid;
@@ -181,7 +192,7 @@ button {
   gap: 14px;
   margin: 34px 0;
 }
-.login-panel .arco-input-inner-wrapper {
+body .login-panel .arco-input-inner-wrapper {
   background: #10130f;
   border-color: #3b4437;
   border-radius: 0;
@@ -309,7 +320,7 @@ button {
   background: transparent !important;
   padding-top: 17px;
 }
-.app-sidebar-menu .arco-menu-item {
+body .app-sidebar-menu .arco-menu-item {
   height: 43px;
   margin: 4px 10px;
   border-radius: 0;
@@ -715,14 +726,14 @@ button {
   padding: 0;
   overflow: hidden;
 }
-.table-surface .arco-table,
-.table-surface .arco-table-th,
-.table-surface .arco-table-td {
+body .table-surface .arco-table,
+body .table-surface .arco-table-th,
+body .table-surface .arco-table-td {
   background: transparent;
   color: var(--ink);
   border-color: var(--line-soft);
 }
-.table-surface .arco-table-th {
+body .table-surface .arco-table-th {
   color: var(--muted);
   font-size: 10px;
   letter-spacing: 0.12em;
@@ -795,10 +806,10 @@ button {
 .publish-fields {
   grid-template-columns: 0.7fr 1.4fr 0.4fr;
 }
-.developer-card .arco-input-inner-wrapper,
-.publish-card .arco-input-inner-wrapper,
-.developer-card .arco-select-view,
-.publish-card .arco-select-view {
+body .developer-card .arco-input-inner-wrapper,
+body .publish-card .arco-input-inner-wrapper,
+body .developer-card .arco-select-view,
+body .publish-card .arco-select-view {
   border-radius: 0;
   background: #121510;
   border-color: var(--line);
@@ -974,23 +985,23 @@ button {
   line-height: 1.55;
 }
 
-.arco-layout {
+body .arco-layout {
   background: transparent;
 }
-.arco-btn {
+body .arco-btn {
   border-radius: 0;
 }
-.arco-tag {
+body .arco-tag {
   border-radius: 0;
 }
-.arco-drawer {
+body .arco-drawer {
   background: var(--panel);
   color: var(--ink);
 }
-.arco-drawer-header {
+body .arco-drawer-header {
   border-color: var(--line);
 }
-.arco-empty-description {
+body .arco-empty-description {
   color: var(--muted);
 }
 @keyframes spin {

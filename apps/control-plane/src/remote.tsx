@@ -1,122 +1,101 @@
-import { ConfigProvider } from '@arco-design/web-react';
-import arcoEnUS from '@arco-design/web-react/es/locale/en-US';
-import arcoZhCN from '@arco-design/web-react/es/locale/zh-CN';
-import type { LocaleSnapshot } from '@awesome-workflow/contracts';
-import { createLocaleSnapshot } from '@awesome-workflow/i18n';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { StrictMode } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
 import type { HostApi, MicroAppModule } from '@awesome-workflow/web-sdk';
 
-import { ControlPlaneApp } from './ControlPlaneApp';
-import { applyControlPlaneDocumentLocale, ControlPlaneI18nProvider, createControlPlaneI18n } from './i18n';
-import { getStandaloneLocaleControls } from './standaloneHost';
-import './arco-isolated.less';
-import './styles.css';
+type RuntimeModule = typeof import('./runtime');
+type PendingMount = {
+  cancelled: boolean;
+  cleanup?: () => void;
+  generation: number;
+  settle: () => void;
+  settled: Promise<void>;
+};
 
-type MountRecord = { cleanup: () => void; mountRoot: HTMLElement; root: Root };
-const mounts = new WeakMap<HTMLElement, MountRecord>();
+let runtime: RuntimeModule | undefined;
+let runtimePromise: Promise<RuntimeModule> | undefined;
+let nextGeneration = 0;
+const pendingMounts = new WeakMap<HTMLElement, PendingMount>();
+
+function loadRuntime(): Promise<RuntimeModule> {
+  runtimePromise ??= import('./runtime')
+    .then((module) => {
+      runtime = module;
+      return module;
+    })
+    .catch((error: unknown) => {
+      runtimePromise = undefined;
+      throw error;
+    });
+  return runtimePromise;
+}
 
 export async function mount(container: HTMLElement, host: HostApi): Promise<() => void> {
-  unmount(container);
-  const [initialPath, initialLocale] = await Promise.all([
-    resolveInitialPath(host),
-    resolveInitialLocale(host),
-  ]);
-  const i18n = await createControlPlaneI18n(initialLocale.locale);
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { refetchOnWindowFocus: false, retry: 1, staleTime: 20_000 },
-    },
-  });
-  const mountRoot = document.createElement('div');
-  mountRoot.className = 'awcp-mount-root';
-  const surface = document.createElement('div');
-  surface.className = 'awcp-react-surface';
-  const portalRoot = document.createElement('div');
-  portalRoot.className = 'awcp-portal-root';
-  mountRoot.append(surface, portalRoot);
-  container.replaceChildren(mountRoot);
-  const root = createRoot(surface);
-  const previousTitle = document.title;
-  const standaloneLocale = getStandaloneLocaleControls(host);
-  const ownsDocumentTitle = standaloneLocale !== undefined;
-  let currentLocale = initialLocale;
-  let disposed = false;
-  let appliedTitle = '';
+  const previous = pendingMounts.get(container);
+  if (previous) cancelMount(container, previous);
 
-  const render = () => {
-    applyControlPlaneDocumentLocale(i18n, currentLocale, document, {
-      ownsTitle: ownsDocumentTitle,
-    });
-    if (ownsDocumentTitle) appliedTitle = document.title;
-    root.render(
-      <StrictMode>
-        <ControlPlaneI18nProvider value={{ instance: i18n, locale: currentLocale, standaloneLocale }}>
-          <ConfigProvider
-            prefixCls="awcp"
-            getPopupContainer={() => portalRoot}
-            locale={currentLocale.locale === 'zh-CN' ? arcoZhCN : arcoEnUS}
-          >
-            <QueryClientProvider client={queryClient}>
-              <ControlPlaneApp host={host} initialPath={initialPath} />
-            </QueryClientProvider>
-          </ConfigProvider>
-        </ControlPlaneI18nProvider>
-      </StrictMode>,
-    );
-  };
-  const unsubscribeLocale = host.events.on('locale.changed', (nextLocale) => {
-    void (async () => {
-      await i18n.changeLanguage(nextLocale.locale);
-      if (disposed) return;
-      currentLocale = nextLocale;
-      render();
-    })();
-  });
-  render();
+  const pending = createPendingMount(++nextGeneration);
+  pendingMounts.set(container, pending);
 
-  const cleanup = () => {
-    disposed = true;
-    unsubscribeLocale();
-    queryClient.clear();
-    if (ownsDocumentTitle && document.title === appliedTitle) document.title = previousTitle;
-  };
-  mounts.set(container, { cleanup, mountRoot, root });
-  return () => unmount(container);
+  try {
+    // Do not let a replacement mount overtake a cancelled runtime mount. Its
+    // eventual cleanup must finish before the next generation touches the DOM.
+    await previous?.settled;
+    if (!isCurrentMount(container, pending)) return NOOP;
+
+    const module = await loadRuntime();
+    if (!isCurrentMount(container, pending)) return NOOP;
+
+    const cleanup = await module.mountControlPlane(container, host);
+    pending.cleanup = cleanup;
+    if (!isCurrentMount(container, pending)) {
+      cleanup();
+      pending.cleanup = undefined;
+      return NOOP;
+    }
+
+    return () => cancelMount(container, pending);
+  } catch (error: unknown) {
+    if (isCurrentMount(container, pending)) cancelMount(container, pending);
+    throw error;
+  } finally {
+    pending.settle();
+  }
 }
 
 export function unmount(container: HTMLElement): void {
-  const record = mounts.get(container);
-  if (!record) return;
-  record.cleanup();
-  record.root.unmount();
-  record.mountRoot.remove();
-  mounts.delete(container);
+  const pending = pendingMounts.get(container);
+  if (!pending) return;
+  cancelMount(container, pending);
 }
+
+function isCurrentMount(container: HTMLElement, pending: PendingMount): boolean {
+  return !pending.cancelled && pendingMounts.get(container)?.generation === pending.generation;
+}
+
+function createPendingMount(generation: number): PendingMount {
+  let settle: () => void = NOOP;
+  const settled = new Promise<void>((resolve) => {
+    settle = resolve;
+  });
+  return { cancelled: false, generation, settle, settled };
+}
+
+function cancelMount(container: HTMLElement, pending: PendingMount): void {
+  if (!isCurrentMount(container, pending)) return;
+  pending.cancelled = true;
+  pendingMounts.delete(container);
+
+  if (pending.cleanup) {
+    const cleanup = pending.cleanup;
+    pending.cleanup = undefined;
+    cleanup();
+    return;
+  }
+
+  // The runtime may already have mounted between its final await and resolving
+  // mountControlPlane(). The late cleanup path above remains the final guard.
+  runtime?.unmountControlPlane(container);
+}
+
+const NOOP = () => undefined;
 
 const remoteModule = { mount, unmount } satisfies MicroAppModule;
 export default remoteModule;
-
-async function resolveInitialPath(host: HostApi): Promise<string> {
-  try {
-    const { pathname } = await host.route.getCurrent();
-    return (
-      ['/applications', '/releases', '/channels', '/approvals'].find((candidate) =>
-        pathname.endsWith(candidate),
-      ) ?? '/applications'
-    );
-  } catch {
-    return '/applications';
-  }
-}
-
-async function resolveInitialLocale(host: HostApi): Promise<LocaleSnapshot> {
-  try {
-    return await host.locale.getCurrent();
-  } catch {
-    return createLocaleSnapshot('en-US', {
-      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
-    });
-  }
-}

@@ -25,6 +25,19 @@ export const enUS = {
     enUS: 'English',
     zhCN: '简体中文',
   },
+  recovery: {
+    diagnostics: 'Technical details',
+    dynamicBody:
+      'The deployment assets may have changed or become unavailable. Reload the page to request the current immutable assets.',
+    dynamicEyebrow: 'RECOVERY / MODULE LOAD',
+    dynamicTitle: 'Control Plane assets could not be loaded',
+    reload: 'Reload page',
+    remount: 'Remount application',
+    renderBody:
+      'The isolated interface encountered an unexpected rendering error. Remount the application or reload the page.',
+    renderEyebrow: 'RECOVERY / RENDER',
+    renderTitle: 'Control Plane stopped rendering',
+  },
   applications: {
     eyebrow: 'Registry / Web applications',
     titleLead: 'Every runtime has a',

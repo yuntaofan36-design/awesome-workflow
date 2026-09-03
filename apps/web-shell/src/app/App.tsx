@@ -1,14 +1,18 @@
-import { ConfigProvider } from '@arco-design/web-react';
+import { ConfigProvider, Spin } from '@arco-design/web-react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { BrowserRouter } from 'react-router-dom';
 
 import { AuthGate } from '../components/AuthGate';
-import { ShellLayout } from '../components/ShellLayout';
 import { useI18n } from '../i18n/I18nProvider';
 
+const ShellLayout = lazy(async () => {
+  const module = await import('../components/ShellLayout');
+  return { default: module.ShellLayout };
+});
+
 export function App() {
-  const { arcoLocale } = useI18n();
+  const { arcoLocale, t } = useI18n();
   const [queryClient] = useState(
     () =>
       new QueryClient({
@@ -23,7 +27,16 @@ export function App() {
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <AuthGate>
-            <ShellLayout />
+            <Suspense
+              fallback={
+                <div className="auth-boot" role="status" aria-live="polite" aria-busy="true">
+                  <span>{t('asyncFailure.shellScope')}</span>
+                  <Spin dot tip={t('asyncFailure.shellLoading')} />
+                </div>
+              }
+            >
+              <ShellLayout />
+            </Suspense>
           </AuthGate>
         </BrowserRouter>
       </QueryClientProvider>

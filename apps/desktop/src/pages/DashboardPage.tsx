@@ -2,6 +2,10 @@ import { useEffect, useState } from 'react';
 import { Alert, Button, Input, Message, Progress, Select, Tag } from '@arco-design/web-react';
 import { IconArrowRight, IconRefresh } from '@arco-design/web-react/icon';
 
+import '@arco-design/web-react/es/Input/style/css.js';
+import '@arco-design/web-react/es/Progress/style/css.js';
+import '@arco-design/web-react/es/Tag/style/css.js';
+
 import { apiRequest } from '@/services/apiClient';
 import { desktopHost, isTauriRuntime } from '@/services/desktopHost';
 import { platformLabel, workspaceRoleLabel } from '@/i18n/domain';

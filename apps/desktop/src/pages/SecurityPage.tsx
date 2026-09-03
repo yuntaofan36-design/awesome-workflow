@@ -1,5 +1,7 @@
 import { Tag } from '@arco-design/web-react';
 
+import '@arco-design/web-react/es/Tag/style/css.js';
+
 import { useLocale } from '@/i18n/localeContext';
 
 const controls = [

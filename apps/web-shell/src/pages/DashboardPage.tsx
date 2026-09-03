@@ -4,6 +4,10 @@ import { MetricCard, SectionIntro, SignalBadge, StatePanel } from '@awesome-work
 import { formatNumber } from '@awesome-workflow/i18n';
 import { Link, useOutletContext } from 'react-router-dom';
 
+import '@arco-design/web-react/es/Card/style/css.js';
+import '@arco-design/web-react/es/Progress/style/css.js';
+import '@arco-design/web-react/es/Skeleton/style/css.js';
+
 import type { ShellOutletContext } from '../components/ShellLayout';
 import { LocalizedErrorAlert } from '../components/LocalizedErrorAlert';
 import { useI18n } from '../i18n/I18nProvider';

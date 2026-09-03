@@ -9,6 +9,16 @@ export const shellResources = {
         retry: 'Retry',
         unscoped: 'Unscoped',
       },
+      asyncFailure: {
+        body: 'The deployment may have changed, or the network interrupted an application module.',
+        eyebrow: 'AW / ASYNC RECOVERY',
+        reload: 'Reload page',
+        retry: 'Try rendering again',
+        runtimeLoading: 'Loading application runtime…',
+        shellLoading: 'Loading workspace shell…',
+        shellScope: 'AW / WORKSPACE SHELL',
+        title: 'Part of the application could not be loaded.',
+      },
       auth: {
         provider: {
           email: 'Email verification code',
@@ -212,6 +222,16 @@ export const shellResources = {
         refreshCatalog: '刷新应用目录',
         retry: '重试',
         unscoped: '未分配范围',
+      },
+      asyncFailure: {
+        body: '部署资源可能已更新，或网络中断了应用模块加载。',
+        eyebrow: 'AW / 异步加载恢复',
+        reload: '重新加载页面',
+        retry: '重试渲染',
+        runtimeLoading: '正在加载应用运行时…',
+        shellLoading: '正在加载工作区界面…',
+        shellScope: 'AW / 工作区界面',
+        title: '部分应用组件加载失败',
       },
       auth: {
         provider: {

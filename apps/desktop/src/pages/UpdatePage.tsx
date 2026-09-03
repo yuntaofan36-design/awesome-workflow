@@ -2,8 +2,11 @@ import { useReducer } from 'react';
 import { Alert, Button, Popconfirm, Progress, Space, Tag } from '@arco-design/web-react';
 import { IconCloudDownload, IconRefresh, IconSync } from '@arco-design/web-react/icon';
 
+import '@arco-design/web-react/es/Popconfirm/style/css.js';
+import '@arco-design/web-react/es/Progress/style/css.js';
+import '@arco-design/web-react/es/Tag/style/css.js';
+
 import { isTauriRuntime } from '@/services/desktopHost';
-import { desktopUpdater } from '@/services/desktopUpdater';
 import { formatUiError, normalizeUiError } from '@/i18n/errors';
 import { useLocale, type Translate } from '@/i18n/localeContext';
 import {
@@ -12,6 +15,8 @@ import {
   reduceDesktopUpdate,
   updateProgressPercent,
 } from '@/services/updateState';
+
+const loadDesktopUpdater = async () => (await import('@/services/desktopUpdater')).desktopUpdater;
 
 export function UpdatePage() {
   const { formatBytes, formatDateTime, t } = useLocale();
@@ -22,6 +27,7 @@ export function UpdatePage() {
   const checkForUpdate = async () => {
     dispatch({ type: 'check-started' });
     try {
+      const desktopUpdater = await loadDesktopUpdater();
       const update = await desktopUpdater.check();
       dispatch(update ? { type: 'update-available', update } : { type: 'no-update' });
     } catch (error) {
@@ -31,6 +37,7 @@ export function UpdatePage() {
 
   const download = async () => {
     try {
+      const desktopUpdater = await loadDesktopUpdater();
       await desktopUpdater.download((event) => {
         if (event.type === 'started') {
           dispatch({ type: 'download-started', contentLength: event.contentLength });
@@ -48,6 +55,7 @@ export function UpdatePage() {
   const install = async () => {
     dispatch({ type: 'install-started' });
     try {
+      const desktopUpdater = await loadDesktopUpdater();
       await desktopUpdater.install();
       dispatch({ type: 'installed' });
     } catch (error) {
@@ -57,6 +65,7 @@ export function UpdatePage() {
 
   const restart = async () => {
     try {
+      const desktopUpdater = await loadDesktopUpdater();
       await desktopUpdater.restart();
     } catch (error) {
       dispatch({ type: 'failed', error: normalizeUiError(error, 'updater_restart_failed') });

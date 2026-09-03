@@ -25,6 +25,17 @@ export const zhCN = {
     enUS: 'English',
     zhCN: '简体中文',
   },
+  recovery: {
+    diagnostics: '技术详情',
+    dynamicBody: '部署资源可能已经更新或暂时不可用。请重新加载页面，以请求当前的不可变资源。',
+    dynamicEyebrow: '恢复 / 模块加载',
+    dynamicTitle: '控制平面资源加载失败',
+    reload: '重新加载页面',
+    remount: '重新挂载应用',
+    renderBody: '隔离界面遇到意外的渲染错误。你可以重新挂载应用，或重新加载页面。',
+    renderEyebrow: '恢复 / 渲染',
+    renderTitle: '控制平面已停止渲染',
+  },
   applications: {
     eyebrow: '应用注册 / Web 应用',
     titleLead: '每一种运行方式都有',

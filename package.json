@@ -8,7 +8,10 @@
     "node": ">=24"
   },
   "scripts": {
-    "build": "turbo build",
+    "build": "turbo build && pnpm check:bundles:dist",
+    "check:bundles": "turbo build --filter=@awesome-workflow/web-shell --filter=@awesome-workflow/desktop --filter=@awesome-workflow/control-plane && pnpm check:bundles:dist",
+    "check:bundles:dist": "node scripts/check-frontend-bundles.mjs",
+    "report:bundles": "node scripts/check-frontend-bundles.mjs --report-only",
     "dev": "turbo dev --parallel",
     "dev:api": "pnpm --filter @awesome-workflow/api dev",
     "dev:worker": "pnpm --filter @awesome-workflow/worker dev",

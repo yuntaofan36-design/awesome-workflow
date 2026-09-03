@@ -31,6 +31,27 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [federationPolicyEndpoint(trustedFederationOrigins), react(), tailwindcss()],
+    build: {
+      manifest: true,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            const moduleId = id.replaceAll('\\', '/');
+            if (moduleId.includes('/node_modules/.pnpm/@module-federation+')) {
+              return 'federation-runtime';
+            }
+            if (
+              moduleId.includes('/node_modules/.pnpm/react@') ||
+              moduleId.includes('/node_modules/.pnpm/react-dom@') ||
+              moduleId.includes('/node_modules/.pnpm/scheduler@')
+            ) {
+              return 'react-core';
+            }
+            return undefined;
+          },
+        },
+      },
+    },
     server: {
       headers: securityHeaders,
       host: '0.0.0.0',

@@ -14,7 +14,7 @@ import {
 } from '@awesome-workflow/i18n';
 import { createContext, useContext, type ReactNode } from 'react';
 
-import { ApiProblemError } from './api';
+import { ApiProblemError } from './apiClient';
 import { enUS } from './locales/en-US';
 import { zhCN } from './locales/zh-CN';
 

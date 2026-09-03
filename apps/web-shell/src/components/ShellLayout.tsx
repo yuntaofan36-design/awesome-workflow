@@ -14,8 +14,14 @@ import {
 import { PlatformMark, SignalBadge } from '@awesome-workflow/ui';
 import type { LocalePreference } from '@awesome-workflow/contracts';
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useMemo } from 'react';
+import { lazy, Suspense, useEffect, useMemo } from 'react';
 import { NavLink, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+
+import '@arco-design/web-react/es/Avatar/style/css.js';
+import '@arco-design/web-react/es/Dropdown/style/css.js';
+import '@arco-design/web-react/es/Menu/style/css.js';
+import '@arco-design/web-react/es/Select/style/css.js';
+import '@arco-design/web-react/es/Tooltip/style/css.js';
 
 import { getCatalog, preserveCatalogForLocaleChange } from '../services/catalog';
 import { getWorkspaces } from '../services/workspaces';
@@ -36,10 +42,20 @@ import {
 } from '../stores/shellStore';
 import { selectSignOut, selectUser, useUserStore } from '../stores/userStore';
 import type { CatalogEntry } from '../types/catalog';
-import { AppRuntimePage } from '../pages/AppRuntimePage';
-import { DashboardPage } from '../pages/DashboardPage';
-import { SecurityPage } from '../pages/SecurityPage';
 import { LocalizedErrorAlert } from './LocalizedErrorAlert';
+
+const AppRuntimePage = lazy(async () => {
+  const module = await import('../pages/AppRuntimePage');
+  return { default: module.AppRuntimePage };
+});
+const DashboardPage = lazy(async () => {
+  const module = await import('../pages/DashboardPage');
+  return { default: module.DashboardPage };
+});
+const SecurityPage = lazy(async () => {
+  const module = await import('../pages/SecurityPage');
+  return { default: module.SecurityPage };
+});
 
 export type ShellOutletContext = {
   catalog: CatalogEntry[];
@@ -258,17 +274,28 @@ export function ShellLayout() {
           </div>
         </header>
 
-        <Routes>
-          <Route element={<Outlet context={context} />}>
-            <Route index element={<DashboardPage />} />
-            <Route path="apps/:slug/*" element={<AppRuntimePage />} />
-            <Route path="security" element={<SecurityPage />} />
-            <Route path="404" element={<NotFoundPage />} />
-            <Route path="*" element={<Navigate replace to="/404" />} />
-          </Route>
-        </Routes>
+        <Suspense fallback={<RoutePending />}>
+          <Routes>
+            <Route element={<Outlet context={context} />}>
+              <Route index element={<DashboardPage />} />
+              <Route path="apps/:slug/*" element={<AppRuntimePage />} />
+              <Route path="security" element={<SecurityPage />} />
+              <Route path="404" element={<NotFoundPage />} />
+              <Route path="*" element={<Navigate replace to="/404" />} />
+            </Route>
+          </Routes>
+        </Suspense>
       </div>
     </div>
+  );
+}
+
+function RoutePending() {
+  const { t } = useI18n();
+  return (
+    <main className="shell-page" aria-busy="true">
+      <Spin dot tip={t('shell.synchronizing')} />
+    </main>
   );
 }
 
