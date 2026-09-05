@@ -63,6 +63,39 @@ test('administrator password login issues the existing HttpOnly session with pla
   });
   assert.equal(session.statusCode, 200, session.body);
   assert.equal(session.json().data.email, 'admin@example.test');
+
+  const wrongDesktopClient = await server.inject({
+    method: 'POST',
+    url: '/api/v1/auth/cli/password',
+    payload: { clientId: 'web-shell', email: 'admin@example.test', password: TEST_PASSWORD },
+  });
+  assert.equal(wrongDesktopClient.statusCode, 400, wrongDesktopClient.body);
+
+  const desktopLogin = await server.inject({
+    method: 'POST',
+    url: '/api/v1/auth/cli/password',
+    payload: {
+      clientId: 'awesome-workflow-desktop',
+      email: 'ADMIN@example.test',
+      password: TEST_PASSWORD,
+    },
+  });
+  assert.equal(desktopLogin.statusCode, 200, desktopLogin.body);
+  assert.equal(desktopLogin.headers['set-cookie'], undefined);
+  assert.equal(desktopLogin.headers['cache-control'], 'no-store');
+  assert.equal(desktopLogin.json().data.user.email, 'admin@example.test');
+  assert.deepEqual(desktopLogin.json().data.user.platformRoles, ['platform_admin']);
+  assert.equal(desktopLogin.json().data.tokenType, 'Bearer');
+  assert.ok(desktopLogin.json().data.accessToken.length >= 32);
+  assert.ok(desktopLogin.json().data.refreshToken.length >= 43);
+
+  const desktopSession = await server.inject({
+    method: 'GET',
+    url: '/api/v1/auth/session',
+    headers: { authorization: `Bearer ${desktopLogin.json().data.accessToken}` },
+  });
+  assert.equal(desktopSession.statusCode, 200, desktopSession.body);
+  assert.equal(desktopSession.json().data.email, 'admin@example.test');
 });
 
 test('password login stays disabled unless the administrator credentials are configured as a pair', async (context) => {

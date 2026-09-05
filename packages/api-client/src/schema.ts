@@ -52,6 +52,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/cli/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["loginWithDesktopPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/email/challenges": {
         parameters: {
             query?: never;
@@ -764,7 +780,7 @@ export interface components {
             contentType: string;
             size: number;
             sha256: string;
-            signature: {
+            signature?: {
                 /** @enum {string} */
                 algorithm: "ed25519";
                 keyId: string;
@@ -1153,7 +1169,7 @@ export interface components {
                 contentType: string;
                 size: number;
                 sha256: string;
-                signature: {
+                signature?: {
                     /** @enum {string} */
                     algorithm: "ed25519";
                     keyId: string;
@@ -1367,7 +1383,7 @@ export interface components {
                 contentType: string;
                 size: number;
                 sha256: string;
-                signature: {
+                signature?: {
                     /** @enum {string} */
                     algorithm: "ed25519";
                     keyId: string;
@@ -1633,6 +1649,117 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["CurrentUser"];
+                    };
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not authorized */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description State conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    loginWithDesktopPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: email */
+                    email: string;
+                    password: string;
+                    /** @enum {string} */
+                    clientId: "awesome-workflow-desktop";
+                };
+            };
+        };
+        responses: {
+            /** @description Successful response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            accessToken: string;
+                            /** Format: date-time */
+                            expiresAt: string;
+                            user: {
+                                /** Format: uuid */
+                                id: string;
+                                /** Format: email */
+                                email: string;
+                                displayName: string;
+                                /** @default [] */
+                                platformRoles: ("platform_admin" | "official_reviewer")[];
+                            };
+                            refreshToken?: string;
+                            /** @enum {string} */
+                            tokenType: "Bearer";
+                        };
+                    };
+                };
+            };
+            /** @description Successful response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            accessToken: string;
+                            /** Format: date-time */
+                            expiresAt: string;
+                            user: {
+                                /** Format: uuid */
+                                id: string;
+                                /** Format: email */
+                                email: string;
+                                displayName: string;
+                                /** @default [] */
+                                platformRoles: ("platform_admin" | "official_reviewer")[];
+                            };
+                            refreshToken?: string;
+                            /** @enum {string} */
+                            tokenType: "Bearer";
+                        };
                     };
                 };
             };
@@ -3172,12 +3299,6 @@ export interface operations {
                                             algorithm: "sha256";
                                             digest: string;
                                         };
-                                        signature: {
-                                            /** @enum {string} */
-                                            algorithm: "ed25519";
-                                            keyId: string;
-                                            value: string;
-                                        };
                                         /** @enum {string} */
                                         kind: "desktop";
                                         name: string;
@@ -3327,7 +3448,7 @@ export interface operations {
                                         downloadUrl: string;
                                         /** Format: date-time */
                                         downloadExpiresAt: string;
-                                        attestation: {
+                                        attestation?: {
                                             /** @enum {string} */
                                             algorithm: "ed25519";
                                             keyId: string;
@@ -3387,12 +3508,6 @@ export interface operations {
                                             algorithm: "sha256";
                                             digest: string;
                                         };
-                                        signature: {
-                                            /** @enum {string} */
-                                            algorithm: "ed25519";
-                                            keyId: string;
-                                            value: string;
-                                        };
                                         /** @enum {string} */
                                         kind: "desktop";
                                         name: string;
@@ -3542,7 +3657,7 @@ export interface operations {
                                         downloadUrl: string;
                                         /** Format: date-time */
                                         downloadExpiresAt: string;
-                                        attestation: {
+                                        attestation?: {
                                             /** @enum {string} */
                                             algorithm: "ed25519";
                                             keyId: string;
@@ -6209,7 +6324,7 @@ export interface operations {
                     contentType: string;
                     size: number;
                     sha256: string;
-                    signature: {
+                    signature?: {
                         /** @enum {string} */
                         algorithm: "ed25519";
                         keyId: string;

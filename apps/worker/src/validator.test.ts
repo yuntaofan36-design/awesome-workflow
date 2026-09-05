@@ -232,6 +232,18 @@ test('Worker binds the signed Federation digest to the unique manifest bytes in 
     ),
   );
 
+  const { signature: _artifactSignature, ...unsignedWebArtifact } = job.artifacts[0]!;
+  const missingArtifactSignature = await validateRelease(
+    { ...job, artifacts: [unsignedWebArtifact] },
+    workerConfigFor(publicKey, origin),
+  );
+  assert.equal(missingArtifactSignature.success, false);
+  assert.ok(
+    missingArtifactSignature.artifactResults[0]?.evidence.some(
+      (item) => item.check === 'signature' && item.outcome === 'failed',
+    ),
+  );
+
   const wrongRuntimeDigest = 'b'.repeat(64);
   const mismatchedManifest = {
     ...manifest,
@@ -319,22 +331,17 @@ test('SBOM parser distinguishes CycloneDX and SPDX JSON', () => {
   assert.throws(() => validateSbomDocument(Buffer.from('not-json'), 'spdx-json'));
 });
 
-test('release validation binds manifest, artifact, SBOM and archive evidence', async (context) => {
+test('unsigned desktop release validation binds digest, SBOM and archive evidence', async (context) => {
   const directory = await mkdtemp(join(tmpdir(), 'aw-worker-release-test-'));
   context.after(() => rm(directory, { recursive: true, force: true }));
   const archivePath = join(directory, 'sample.awpkg');
   await writeZip(archivePath, [['payload/main.py', Buffer.from('print("ok")')]]);
   const artifactBytes = await readFile(archivePath);
+  const tamperedArtifactBytes = Buffer.from(artifactBytes);
+  tamperedArtifactBytes.writeUInt8(tamperedArtifactBytes.readUInt8(0) ^ 0xff, 0);
   const artifactSha256 = createHash('sha256').update(artifactBytes).digest('hex');
   const sbomBytes = Buffer.from('{"bomFormat":"CycloneDX","specVersion":"1.6"}');
   const sbomSha256 = createHash('sha256').update(sbomBytes).digest('hex');
-  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
-  const rawPublicKey = publicKey.export({ format: 'der', type: 'spki' }).subarray(-32);
-  const signatureIdentity = {
-    algorithm: 'ed25519' as const,
-    keyId: 'publisher',
-    value: 'A'.repeat(88),
-  };
   const artifactDeclaration = {
     name: 'windows-x64',
     fileName: 'sample.awpkg',
@@ -352,7 +359,6 @@ test('release validation binds manifest, artifact, SBOM and archive evidence', a
       algorithm: 'sha256' as const,
       digest: await computeArtifactSetIntegritySha256([artifactDeclaration]),
     },
-    signature: signatureIdentity,
     kind: 'desktop' as const,
     name: 'Sample desktop',
     description: 'Worker integration fixture',
@@ -372,16 +378,19 @@ test('release validation binds manifest, artifact, SBOM and archive evidence', a
     runMode: 'serial' as const,
     minHostVersion: '0.1.0',
   };
-  manifest.signature.value = sign(
-    null,
-    Buffer.from(canonicalizeManifestForSignature(manifest), 'utf8'),
-    privateKey,
-  ).toString('base64');
 
   const server = createServer((request, response) => {
     if (request.url === '/sample.awpkg') {
       response.writeHead(200, { 'content-type': 'application/zip', 'content-length': artifactBytes.length });
       response.end(artifactBytes);
+      return;
+    }
+    if (request.url === '/tampered.awpkg') {
+      response.writeHead(200, {
+        'content-type': 'application/zip',
+        'content-length': tamperedArtifactBytes.length,
+      });
+      response.end(tamperedArtifactBytes);
       return;
     }
     if (request.url === '/sample.sbom.json') {
@@ -403,40 +412,57 @@ test('release validation binds manifest, artifact, SBOM and archive evidence', a
     REDIS_URL: 'redis://127.0.0.1:6379',
     WORKER_API_BASE_URL: 'http://127.0.0.1:4100',
     WORKER_CALLBACK_TOKEN: 'test-worker-callback-token-at-least-32-characters',
-    RELEASE_SIGNING_PUBLIC_KEYS: JSON.stringify({ publisher: rawPublicKey.toString('base64') }),
     ARTIFACT_ALLOWED_ORIGINS: origin,
   });
-  const result = await validateRelease(
-    {
-      releaseId: '11111111-1111-4111-8111-111111111111',
-      manifest,
-      artifacts: [
-        {
-          artifactId: '22222222-2222-4222-8222-222222222222',
-          fileName: 'sample.awpkg',
-          url: `${origin}/sample.awpkg`,
-          expectedSha256: artifactSha256,
-          expectedSize: artifactBytes.length,
-          signature: {
-            algorithm: 'ed25519',
-            keyId: 'publisher',
-            value: sign(null, Buffer.from(artifactSha256, 'hex'), privateKey).toString('base64'),
-          },
-          sbom: {
-            format: 'cyclonedx-json',
-            fileName: 'sample.sbom.json',
-            mediaType: 'application/vnd.cyclonedx+json',
-            sha256: sbomSha256,
-            url: `${origin}/sample.sbom.json`,
-          },
+  const job: ReleaseValidationJob = {
+    releaseId: '11111111-1111-4111-8111-111111111111',
+    manifest,
+    artifacts: [
+      {
+        artifactId: '22222222-2222-4222-8222-222222222222',
+        fileName: 'sample.awpkg',
+        url: `${origin}/sample.awpkg`,
+        expectedSha256: artifactSha256,
+        expectedSize: artifactBytes.length,
+        sbom: {
+          format: 'cyclonedx-json',
+          fileName: 'sample.sbom.json',
+          mediaType: 'application/vnd.cyclonedx+json',
+          sha256: sbomSha256,
+          url: `${origin}/sample.sbom.json`,
         },
-      ],
+      },
+    ],
+  };
+  assert.equal(config.signingKeys.size, 0);
+  const result = await validateRelease(job, config);
+  assert.equal(result.success, true);
+  assert.equal(result.artifactResults[0]?.success, true);
+  assert.equal(
+    result.releaseEvidence.some((item) => item.check === 'signature'),
+    false,
+  );
+  assert.equal(
+    result.artifactResults[0]?.evidence.some((item) => item.check === 'signature'),
+    false,
+  );
+
+  const tampered = await validateRelease(
+    {
+      ...job,
+      artifacts: job.artifacts.map((artifact) => ({
+        ...artifact,
+        url: `${origin}/tampered.awpkg`,
+      })),
     },
     config,
   );
-  assert.equal(result.success, true);
-  assert.equal(result.artifactResults[0]?.success, true);
-  assert.ok(result.releaseEvidence.some((item) => item.check === 'signature' && item.outcome === 'passed'));
+  assert.equal(tampered.success, false);
+  assert.ok(
+    tampered.artifactResults[0]?.evidence.some(
+      (item) => item.check === 'digest' && item.outcome === 'failed',
+    ),
+  );
 });
 
 async function writeZip(path: string, entries: Array<[string, Buffer]>): Promise<void> {

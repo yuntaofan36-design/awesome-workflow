@@ -124,6 +124,37 @@ test('Nest/Fastify API enforces auth, RBAC, immutable release review, promotion 
     allowedOrigin: 'https://sample.example.test',
     sandbox: ['allow-scripts'],
   };
+  const missingWebSignature = await server.inject({
+    method: 'POST',
+    url: `/api/v1/applications/${application.id}/releases`,
+    cookies: { aw_session: reviewer.cookie },
+    payload: { version: '1.0.0', manifest, sbom },
+  });
+  assert.equal(missingWebSignature.statusCode, 400, missingWebSignature.body);
+  assert.equal(missingWebSignature.json().code, 'manifest_signature_mismatch');
+
+  const desktopApplicationResponse = await server.inject({
+    method: 'POST',
+    url: `/api/v1/workspaces/${workspace.id}/applications`,
+    cookies: { aw_session: reviewer.cookie },
+    payload: {
+      slug: 'web-manifest-kind-regression',
+      name: 'Manifest kind regression',
+      summary: 'Rejects a web manifest for a desktop application',
+      kind: 'desktop',
+    },
+  });
+  assert.equal(desktopApplicationResponse.statusCode, 201, desktopApplicationResponse.body);
+  const desktopApplication = desktopApplicationResponse.json().data as { id: string };
+  const mismatchedManifestResponse = await server.inject({
+    method: 'POST',
+    url: `/api/v1/applications/${desktopApplication.id}/releases`,
+    cookies: { aw_session: reviewer.cookie },
+    payload: { version: '1.0.0', manifest, signature, sbom },
+  });
+  assert.equal(mismatchedManifestResponse.statusCode, 400, mismatchedManifestResponse.body);
+  assert.equal(mismatchedManifestResponse.json().code, 'manifest_kind_mismatch');
+
   const releaseResponse = await server.inject({
     method: 'POST',
     url: `/api/v1/applications/${application.id}/releases`,

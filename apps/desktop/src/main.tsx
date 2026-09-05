@@ -1,7 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 
-import './styles/arco-auth';
 import './styles/index.css';
 import { App } from './app/App';
 import { initializeDesktopLocale } from './i18n/runtime';

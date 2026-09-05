@@ -111,7 +111,7 @@ export type ReleaseInput = {
   version: string;
   manifest: ReleaseManifest;
   manifestSha256: string;
-  signature: Release['signature'];
+  signature?: Release['signature'];
   sbom: Release['sbom'];
   createdBy: string;
 };

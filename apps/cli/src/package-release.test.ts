@@ -69,35 +69,61 @@ test('package output is deterministic and uses separate valid manifest and artif
       ),
       true,
     );
+    const artifactSignature = firstArtifact.signature;
+    assert.ok(artifactSignature);
     assert.equal(
       verify(
         null,
         Buffer.from(firstArtifact.sha256, 'hex'),
         publicKey,
-        Buffer.from(firstArtifact.signature.value, 'base64'),
+        Buffer.from(artifactSignature.value, 'base64'),
       ),
       true,
     );
-    assert.notEqual(first.manifest.signature.value, firstArtifact.signature.value);
+    assert.notEqual(first.manifest.signature.value, artifactSignature.value);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
 });
 
-test('multi-artifact desktop package binds and signs the complete deterministic artifact set', async () => {
+test('web packaging still requires a publisher key id and private key', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'aw-cli-web-signature-'));
+  const input = join(directory, 'dist');
+  const manifestPath = join(directory, 'web.manifest.json');
+  try {
+    await mkdir(input);
+    await writeFile(join(input, 'mf-manifest.json'), '{}');
+    await writeFile(join(input, 'remoteEntry.js'), 'export {};');
+    await initializeManifest({ kind: 'web', appId: 'signed-web', outputPath: manifestPath });
+    await assert.rejects(
+      packageRelease({
+        manifestPath,
+        inputDirectory: input,
+        outputDirectory: join(directory, 'package'),
+      }),
+      /--key-id/,
+    );
+    await assert.rejects(
+      packageRelease({
+        manifestPath,
+        inputDirectory: input,
+        outputDirectory: join(directory, 'package'),
+        keyId: 'publisher-test',
+      }),
+      /exactly one of --private-key/,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('multi-artifact desktop package binds the complete deterministic artifact set without signatures', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'aw-cli-multi-package-'));
   const windowsInput = join(directory, 'windows-x64');
   const macosInput = join(directory, 'macos-arm64');
   const manifestPath = join(directory, 'desktop.manifest.json');
-  const keyPath = join(directory, 'publisher.pem');
   const firstOutput = join(directory, 'first');
   const secondOutput = join(directory, 'second');
-  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
-  const placeholder = {
-    algorithm: 'ed25519',
-    keyId: 'unconfigured-publisher-key',
-    value: 'UNSIGNED_TEMPLATE_REPLACED_BY_AW_PACKAGE_000000000000000000000000',
-  } as const;
   const artifacts = [
     {
       name: 'windows-x64-native',
@@ -133,7 +159,6 @@ test('multi-artifact desktop package binds and signs the complete deterministic 
           description: 'Two target desktop package fixture',
           artifacts,
           integrity: { algorithm: 'sha256', digest: '0'.repeat(64) },
-          signature: placeholder,
           runtimes: [
             {
               kind: 'native',
@@ -157,8 +182,6 @@ test('multi-artifact desktop package binds and signs the complete deterministic 
         2,
       )}\n`,
     );
-    await writeFile(keyPath, privateKey.export({ format: 'pem', type: 'pkcs8' }), { mode: 0o600 });
-
     const first = await packageRelease({
       manifestPath,
       artifactInputs: [
@@ -166,8 +189,6 @@ test('multi-artifact desktop package binds and signs the complete deterministic 
         { name: 'macos-arm64-native', inputDirectory: macosInput },
       ],
       outputDirectory: firstOutput,
-      keyId: 'publisher-test',
-      privateKeyPath: keyPath,
     });
     const second = await packageRelease({
       manifestPath,
@@ -176,8 +197,6 @@ test('multi-artifact desktop package binds and signs the complete deterministic 
         { name: 'windows-x64-native', inputDirectory: windowsInput },
       ],
       outputDirectory: secondOutput,
-      keyId: 'publisher-test',
-      privateKeyPath: keyPath,
     });
 
     assert.equal(first.metadata.schemaVersion, 2);
@@ -189,15 +208,8 @@ test('multi-artifact desktop package binds and signs the complete deterministic 
       first.manifest.integrity.digest,
       await computeArtifactSetIntegritySha256(first.manifest.artifacts),
     );
-    assert.equal(
-      verify(
-        null,
-        Buffer.from(canonicalizeManifestForSignature(first.manifest), 'utf8'),
-        publicKey,
-        Buffer.from(first.manifest.signature.value, 'base64'),
-      ),
-      true,
-    );
+    assert.equal(first.manifest.kind, 'desktop');
+    assert.equal(Object.hasOwn(first.manifest, 'signature'), false);
     for (const artifact of first.artifacts) {
       const matching = second.artifacts.find((candidate) => candidate.name === artifact.name)!;
       assert.equal(artifact.sha256, matching.sha256);
@@ -205,29 +217,23 @@ test('multi-artifact desktop package binds and signs the complete deterministic 
         await readFile(join(firstOutput, artifact.fileName)),
         await readFile(join(secondOutput, matching.fileName)),
       );
-      assert.equal(
-        verify(
-          null,
-          Buffer.from(artifact.sha256, 'hex'),
-          publicKey,
-          Buffer.from(artifact.signature.value, 'base64'),
-        ),
-        true,
-      );
+      assert.equal(Object.hasOwn(artifact, 'signature'), false);
     }
     const readBack = await readPackageMetadata(first.metadataPath);
     assert.equal(readBack.artifacts.length, 2);
+    assert.equal(
+      readBack.artifacts.every((artifact) => !artifact.metadata.signature),
+      true,
+    );
+    assert.equal((await readFile(first.metadataPath, 'utf8')).includes('"signature"'), false);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
 });
 
-test('checked-in Python and Web UI examples produce complete signed package metadata', async () => {
+test('checked-in Python and Web UI desktop examples produce complete unsigned package metadata', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'aw-cli-examples-'));
-  const keyPath = join(directory, 'publisher.pem');
-  const { privateKey } = generateKeyPairSync('ed25519');
   const examplesRoot = resolve(process.cwd(), '../../examples');
-  await writeFile(keyPath, privateKey.export({ format: 'pem', type: 'pkcs8' }), { mode: 0o600 });
   try {
     for (const [name, expectedArtifacts] of [
       ['desktop-applet', 2],
@@ -238,15 +244,15 @@ test('checked-in Python and Web UI examples produce complete signed package meta
         manifestPath: join(exampleRoot, 'applet.json'),
         artifactInputs: await readArtifactInputMap(join(exampleRoot, 'aw.package.json')),
         outputDirectory: join(directory, name),
-        keyId: 'example-test-publisher',
-        privateKeyPath: keyPath,
       });
       assert.equal(packaged.metadata.schemaVersion, 2);
       assert.equal(packaged.artifacts.length, expectedArtifacts);
       assert.equal((await readPackageMetadata(packaged.metadataPath)).artifacts.length, expectedArtifacts);
-      assert.notEqual(
-        packaged.manifest.signature.value,
-        'UNSIGNED_TEMPLATE_REPLACED_BY_AW_PACKAGE_000000000000000000000000',
+      assert.equal(packaged.manifest.kind, 'desktop');
+      assert.equal(Object.hasOwn(packaged.manifest, 'signature'), false);
+      assert.equal(
+        packaged.artifacts.every((artifact) => !artifact.signature),
+        true,
       );
     }
   } finally {

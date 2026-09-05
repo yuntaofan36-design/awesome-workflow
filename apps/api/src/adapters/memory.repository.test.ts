@@ -237,7 +237,7 @@ test('desktop control plane preserves release, revision, installation and run st
       trustTier: 'isolated',
     },
   });
-  await approveRelease(repository, webRelease.id, webArtifact, owner.id);
+  await approveRelease(repository, webRelease.id, webArtifact, owner.id, testSignature);
   await assert.rejects(
     repository.requestInstallation({
       workspaceId: workspace.id,
@@ -264,10 +264,9 @@ test('desktop control plane preserves release, revision, installation and run st
     version: '2.3.4',
     artifacts: [desktopArtifact],
     integrity: { algorithm: 'sha256', digest: 'd'.repeat(64) },
-    signature: testSignature,
     kind: 'desktop',
     name: 'Desktop runner',
-    description: 'Runs a signed native micro-application',
+    description: 'Runs a native micro-application in the managed desktop runtime',
     defaultLocale: 'en-US',
     localizations: {},
     runtimes: [
@@ -294,7 +293,6 @@ test('desktop control plane preserves release, revision, installation and run st
     version: desktopManifest.version,
     manifest: desktopManifest,
     manifestSha256: 'd'.repeat(64),
-    signature: testSignature,
     sbom: testSbom,
     createdBy: owner.id,
   });
@@ -719,6 +717,7 @@ async function approveRelease(
   releaseId: string,
   declaration: ReturnType<typeof artifactDeclaration>,
   reviewerId: string,
+  signature?: typeof testSignature,
 ): Promise<void> {
   const artifact = await repository.createArtifact({
     releaseId,
@@ -726,7 +725,7 @@ async function approveRelease(
     contentType: declaration.mediaType,
     size: declaration.size,
     sha256: declaration.sha256,
-    signature: testSignature,
+    ...(signature ? { signature } : {}),
     sbom: testSbom,
     storageKey: `releases/${releaseId}/${declaration.fileName}`,
     sbomStorageKey: `releases/${releaseId}/${testSbom.fileName}`,

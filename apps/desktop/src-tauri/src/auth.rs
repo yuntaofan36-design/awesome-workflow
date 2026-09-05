@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     io::{Read, Write},
     net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream},
     process::{Command, Stdio},
@@ -36,6 +37,10 @@ pub enum AuthError {
     CredentialUnavailable,
     #[error("the secure credential is invalid; sign in again")]
     InvalidCredential,
+    #[error("the email or password is incorrect")]
+    InvalidCredentials,
+    #[error("administrator password login is disabled")]
+    PasswordAuthenticationDisabled,
     #[error("the authentication server returned an invalid response")]
     InvalidResponse,
     #[error("the authentication request was rejected with status {0}")]
@@ -159,6 +164,7 @@ pub struct DesktopSession {
 pub struct AuthProviderDescriptor {
     pub id: String,
     pub label: String,
+    pub label_key: String,
     pub protocol: String,
     pub status: String,
     pub strategy: Option<String>,
@@ -247,6 +253,14 @@ struct TokenInput<'a> {
     code: &'a str,
     code_verifier: &'a str,
     redirect_uri: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PasswordInput<'a> {
+    client_id: &'static str,
+    email: &'a str,
+    password: &'a str,
 }
 
 #[derive(Deserialize)]
@@ -379,6 +393,40 @@ impl DesktopAuth {
         self.login_with_receiver(&receiver, LoginMaterial::generate()?, locale)
     }
 
+    pub fn login_password(
+        &self,
+        email: &str,
+        password: &str,
+        locale: &str,
+    ) -> AuthResult<DesktopSession> {
+        let locale = DesktopLocale::parse(locale)?;
+        if email.len() > 254 || !email.contains('@') || password.is_empty() || password.len() > 1024
+        {
+            return Err(AuthError::InvalidCredentials);
+        }
+        let _guard = self
+            .credential_lock
+            .lock()
+            .map_err(|_| AuthError::Transport)?;
+        let response = self.http.send(HttpRequest {
+            method: HttpMethod::Post,
+            url: self.api_url("auth/cli/password")?,
+            bearer: None,
+            body: Some(
+                serde_json::to_value(PasswordInput {
+                    client_id: DESKTOP_PUBLIC_CLIENT_ID,
+                    email,
+                    password,
+                })
+                .map_err(|_| AuthError::InvalidResponse)?,
+            ),
+            form: None,
+            accept_language: Some(locale.as_str().to_owned()),
+        })?;
+        let token: TokenResult = decode_password_success(response)?;
+        self.persist_token_result(token)
+    }
+
     fn login_with_receiver(
         &self,
         receiver: &dyn AuthorizationReceiver,
@@ -411,6 +459,10 @@ impl DesktopAuth {
             },
             locale,
         )?;
+        self.persist_token_result(token)
+    }
+
+    fn persist_token_result(&self, token: TokenResult) -> AuthResult<DesktopSession> {
         validate_token_result(&token)?;
         let credential = StoredCredential {
             api_base_url: self.api_base.to_string(),
@@ -467,8 +519,12 @@ impl DesktopAuth {
         let Some(mut credential) = self.load_ready_credential(locale)? else {
             return Err(AuthError::InvalidCredential);
         };
-        let path = input.path.trim_start_matches('/');
-        let url = self.api_url(path)?;
+        let (path, query) = input.path.trim_start_matches('/').split_once('?').map_or(
+            (input.path.trim_start_matches('/'), None),
+            |(path, query)| (path, Some(query)),
+        );
+        let mut url = self.api_url(path)?;
+        url.set_query(query);
         let mut response = self.http.send(HttpRequest {
             method: HttpMethod::Get,
             url: url.clone(),
@@ -688,6 +744,20 @@ fn decode_success<T: DeserializeOwned>(response: HttpResponse) -> AuthResult<T> 
         .map_err(|_| AuthError::InvalidResponse)
 }
 
+fn decode_password_success<T: DeserializeOwned>(response: HttpResponse) -> AuthResult<T> {
+    if !(200..300).contains(&response.status) {
+        let code = serde_json::from_slice::<Value>(&response.body)
+            .ok()
+            .and_then(|body| body.get("code").and_then(Value::as_str).map(str::to_owned));
+        return Err(match code.as_deref() {
+            Some("invalid_credentials") => AuthError::InvalidCredentials,
+            Some("password_auth_disabled") => AuthError::PasswordAuthenticationDisabled,
+            _ => AuthError::Rejected(response.status),
+        });
+    }
+    decode_success(response)
+}
+
 fn decode_oauth_success<T: DeserializeOwned>(response: HttpResponse) -> AuthResult<T> {
     if !(200..300).contains(&response.status) {
         return Err(AuthError::Rejected(response.status));
@@ -798,22 +868,71 @@ fn unix_timestamp() -> AuthResult<i64> {
 fn validate_broker_endpoint(method: DesktopApiMethod, path: &str) -> AuthResult<()> {
     if !matches!(method, DesktopApiMethod::Get)
         || !path.starts_with('/')
-        || path.contains(['\\', '?', '#'])
+        || path.contains(['\\', '#'])
         || path.contains("..")
+        || path.len() > 1_024
     {
         return Err(AuthError::EndpointNotAllowed);
     }
-    let segments = path.trim_matches('/').split('/').collect::<Vec<_>>();
-    let allowed = matches!(
-        segments.as_slice(),
-        ["auth", "session"] | ["auth", "providers"] | ["workspaces"] | ["catalog"]
-    ) || matches!(segments.as_slice(), ["workspaces", id, "applications"] if Uuid::parse_str(id).is_ok())
-        || matches!(segments.as_slice(), ["releases", id, "status"] if Uuid::parse_str(id).is_ok());
+    let (pathname, query) = path
+        .split_once('?')
+        .map_or((path, None), |(pathname, query)| (pathname, Some(query)));
+    let segments = pathname.trim_matches('/').split('/').collect::<Vec<_>>();
+    let allowed = match segments.as_slice() {
+        ["auth", "session"] | ["auth", "providers"] | ["workspaces"] => query.is_none(),
+        ["workspaces", id, "applications"] | ["workspaces", id, "releases"] => {
+            query.is_none() && Uuid::parse_str(id).is_ok()
+        }
+        ["releases", id, "status"] => query.is_none() && Uuid::parse_str(id).is_ok(),
+        ["catalog"] => validate_catalog_query(query),
+        ["runs"] => validate_workspace_query(query),
+        _ => false,
+    };
     if allowed {
         Ok(())
     } else {
         Err(AuthError::EndpointNotAllowed)
     }
+}
+
+fn validate_catalog_query(query: Option<&str>) -> bool {
+    let Some(values) = parse_broker_query(query) else {
+        return false;
+    };
+    values.len() == 3
+        && values
+            .get("workspaceId")
+            .is_some_and(|value| Uuid::parse_str(value).is_ok())
+        && values
+            .get("channel")
+            .is_some_and(|value| matches!(value.as_str(), "dev" | "canary" | "stable"))
+        && values.get("kind").is_some_and(|value| value == "desktop")
+}
+
+fn validate_workspace_query(query: Option<&str>) -> bool {
+    let Some(values) = parse_broker_query(query) else {
+        return false;
+    };
+    values.len() == 1
+        && values
+            .get("workspaceId")
+            .is_some_and(|value| Uuid::parse_str(value).is_ok())
+}
+
+fn parse_broker_query(query: Option<&str>) -> Option<HashMap<String, String>> {
+    let query = query.filter(|value| !value.is_empty() && value.len() <= 512)?;
+    let mut values = HashMap::new();
+    for (key, value) in url::form_urlencoded::parse(query.as_bytes()) {
+        if key.is_empty()
+            || value.is_empty()
+            || values
+                .insert(key.into_owned(), value.into_owned())
+                .is_some()
+        {
+            return None;
+        }
+    }
+    Some(values)
 }
 
 impl LoginMaterial {
@@ -1436,6 +1555,70 @@ mod tests {
     }
 
     #[test]
+    fn password_login_keeps_token_in_credential_store_without_opening_browser() {
+        let store = Arc::new(MemoryStore::default());
+        let http = Arc::new(MockHttp::new(vec![response(
+            200,
+            serde_json::json!({"data": {
+                "accessToken": "password-session-token-that-never-enters-the-webview",
+                "refreshToken": "password-refresh-token-that-never-enters-the-webview-1234567890",
+                "tokenType": "Bearer",
+                "expiresAt": future_expiry(),
+                "user": {
+                    "id": USER_ID,
+                    "email": "admin@example.test",
+                    "displayName": "admin",
+                    "platformRoles": ["platform_admin"]
+                }
+            }}),
+        )]));
+        let browser = Arc::new(MockBrowser::default());
+        let auth = DesktopAuth::new(
+            Url::parse("https://api.example.test/api/v1").unwrap(),
+            store.clone(),
+            http.clone(),
+            browser.clone(),
+        );
+
+        let session = auth
+            .login_password("admin@example.test", "correct-password", "zh-CN")
+            .unwrap();
+        assert_eq!(session.user.email, "admin@example.test");
+        assert!(browser.0.lock().unwrap().is_empty());
+        let stored = store.0.lock().unwrap().clone().unwrap();
+        assert!(stored.contains("password-session-token"));
+        assert!(stored.contains("password-refresh-token"));
+
+        let requests = http.requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].url.path(), "/api/v1/auth/cli/password");
+        assert_eq!(requests[0].accept_language.as_deref(), Some("zh-CN"));
+        let body = requests[0].body.as_ref().unwrap();
+        assert_eq!(body["clientId"], DESKTOP_PUBLIC_CLIENT_ID);
+        assert_eq!(body["email"], "admin@example.test");
+    }
+
+    #[test]
+    fn password_login_maps_rejected_credentials_without_persisting_them() {
+        let store = Arc::new(MemoryStore::default());
+        let auth = DesktopAuth::new(
+            Url::parse("https://api.example.test/api/v1").unwrap(),
+            store.clone(),
+            Arc::new(MockHttp::new(vec![response(
+                401,
+                serde_json::json!({"code": "invalid_credentials"}),
+            )])),
+            Arc::new(MockBrowser::default()),
+        );
+
+        assert!(matches!(
+            auth.login_password("admin@example.test", "wrong-password", "en-US"),
+            Err(AuthError::InvalidCredentials)
+        ));
+        assert!(store.0.lock().unwrap().is_none());
+    }
+
+    #[test]
     fn session_provider_and_logout_requests_forward_the_selected_locale() {
         let store = Arc::new(MemoryStore::default());
         store
@@ -1455,6 +1638,7 @@ mod tests {
                 serde_json::json!({"data": [{
                     "id": "email",
                     "label": "Email",
+                    "labelKey": "auth.provider.email",
                     "protocol": "email_otp",
                     "status": "active",
                     "strategy": "local_email_otp"
@@ -1561,6 +1745,38 @@ mod tests {
             }),
             Err(AuthError::EndpointNotAllowed)
         ));
+    }
+
+    #[test]
+    fn authenticated_broker_allows_only_bounded_developer_platform_reads() {
+        let workspace_id = "42bf7a23-b1a2-4b66-8c55-2d0b29e216ad";
+        let release_id = "8a32ada1-7af9-4df7-903a-df7b05718343";
+        for path in [
+            format!("/workspaces/{workspace_id}/applications"),
+            format!("/workspaces/{workspace_id}/releases"),
+            format!("/releases/{release_id}/status"),
+            format!("/runs?workspaceId={workspace_id}"),
+            format!("/catalog?workspaceId={workspace_id}&channel=dev&kind=desktop"),
+        ] {
+            assert!(
+                validate_broker_endpoint(DesktopApiMethod::Get, &path).is_ok(),
+                "{path}"
+            );
+        }
+
+        for path in [
+            format!("/runs?workspaceId={workspace_id}&includeSecrets=true"),
+            format!("/runs?workspaceId={workspace_id}&workspaceId={workspace_id}"),
+            format!("/catalog?workspaceId={workspace_id}&channel=stable&kind=web"),
+            format!("/catalog?workspaceId={workspace_id}&channel=unknown&kind=desktop"),
+            format!("/workspaces/{workspace_id}/audit-events"),
+            "/runs?workspaceId=not-a-uuid".into(),
+        ] {
+            assert!(matches!(
+                validate_broker_endpoint(DesktopApiMethod::Get, &path),
+                Err(AuthError::EndpointNotAllowed)
+            ));
+        }
     }
 
     #[test]

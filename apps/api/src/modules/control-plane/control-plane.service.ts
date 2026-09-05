@@ -324,7 +324,7 @@ export class ControlPlaneService {
         sha256: declaration.sha256,
         downloadUrl: download.url,
         downloadExpiresAt: download.expiresAt,
-        attestation: artifact.signature,
+        ...(artifact.signature ? { attestation: artifact.signature } : {}),
       },
     };
   }
@@ -528,6 +528,13 @@ export class ControlPlaneService {
   async createRelease(actor: CurrentUser, applicationId: string, input: CreateReleaseInput) {
     const application = await this.repository.getApplication(applicationId);
     await this.requireWorkspaceRole(actor, application.workspaceId, WRITE_ROLES);
+    if (input.manifest.kind !== application.kind) {
+      throw new DomainError(
+        400,
+        'manifest_kind_mismatch',
+        'Manifest kind must match the target application kind',
+      );
+    }
     if (input.manifest.appId !== application.slug || input.manifest.version !== input.version) {
       throw new DomainError(
         400,
@@ -535,15 +542,18 @@ export class ControlPlaneService {
         'Manifest appId and version must match the target application release',
       );
     }
-    if (
-      input.manifest.signature.keyId !== input.signature.keyId ||
-      input.manifest.signature.value !== input.signature.value
-    ) {
-      throw new DomainError(
-        400,
-        'manifest_signature_mismatch',
-        'Release signature must match the signed manifest envelope',
-      );
+    if (input.manifest.kind === 'web') {
+      if (
+        !input.signature ||
+        input.manifest.signature.keyId !== input.signature.keyId ||
+        input.manifest.signature.value !== input.signature.value
+      ) {
+        throw new DomainError(
+          400,
+          'manifest_signature_mismatch',
+          'Web release signature must match the signed manifest envelope',
+        );
+      }
     }
     if (
       (await computeArtifactSetIntegritySha256(input.manifest.artifacts)) !== input.manifest.integrity.digest
@@ -555,7 +565,13 @@ export class ControlPlaneService {
       );
     }
     const manifestSha256 = createHash('sha256').update(canonicalizeManifest(input.manifest)).digest('hex');
-    return this.repository.createRelease({ ...input, applicationId, manifestSha256, createdBy: actor.id });
+    return this.repository.createRelease({
+      ...input,
+      applicationId,
+      manifestSha256,
+      signature: input.manifest.kind === 'web' ? input.signature : undefined,
+      createdBy: actor.id,
+    });
   }
 
   async createArtifact(actor: CurrentUser, releaseId: string, input: CreateArtifactInput) {
@@ -573,12 +589,14 @@ export class ControlPlaneService {
         'Artifact file, media type, size, and digest must match the immutable manifest',
       );
     }
-    if (input.signature.keyId !== release.signature.keyId) {
-      throw new DomainError(
-        400,
-        'artifact_signer_mismatch',
-        'Artifact and release signatures must use the same publisher key',
-      );
+    if (release.manifest.kind === 'web') {
+      if (!input.signature || !release.signature || input.signature.keyId !== release.signature.keyId) {
+        throw new DomainError(
+          400,
+          'artifact_signer_mismatch',
+          'Web artifact and release signatures must use the same publisher key',
+        );
+      }
     }
     const artifactId = randomUUID();
     const storageKey = `objects/sha256/${input.sha256}/${input.fileName}`;
@@ -601,6 +619,7 @@ export class ControlPlaneService {
       releaseId,
       storageKey,
       sbomStorageKey,
+      signature: release.manifest.kind === 'web' ? input.signature : undefined,
     });
     return {
       artifact,

@@ -85,6 +85,11 @@ export type AuthSessionResult = z.infer<typeof AuthSessionResultSchema>;
 export const DESKTOP_PUBLIC_CLIENT_ID = 'awesome-workflow-desktop' as const;
 export const DESKTOP_OFFLINE_SCOPE = 'openid profile email offline_access' as const;
 
+export const CliPasswordLoginInputSchema = PasswordLoginInputSchema.extend({
+  clientId: z.literal(DESKTOP_PUBLIC_CLIENT_ID),
+});
+export type CliPasswordLoginInput = z.infer<typeof CliPasswordLoginInputSchema>;
+
 export const OidcAuthorizationInputSchema = z.object({
   provider: SocialAuthProviderIdSchema.optional(),
   returnTo: InternalReturnPathSchema.optional(),

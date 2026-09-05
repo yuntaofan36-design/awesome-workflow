@@ -56,15 +56,23 @@ export async function validateRelease(
   try {
     assertArtifactSetMatchesManifest(job);
     releaseEvidence.push(evidence('manifest', 'passed', { artifactSet: 'matched' }));
-    verifyPublisherSignature(
-      Buffer.from(canonicalizeManifestForSignature(manifest), 'utf8'),
-      manifest.signature,
-      config.signingKeys,
-    );
-    releaseEvidence.push(evidence('signature', 'passed', { keyId: manifest.signature.keyId }));
   } catch (error) {
     releaseEvidence.push(evidence('manifest', 'failed', { reason: safeMessage(error) }));
     return rejectedRelease(job, releaseEvidence, 'Release manifest validation failed');
+  }
+
+  if (manifest.kind === 'web') {
+    try {
+      verifyPublisherSignature(
+        Buffer.from(canonicalizeManifestForSignature(manifest), 'utf8'),
+        manifest.signature,
+        config.signingKeys,
+      );
+      releaseEvidence.push(evidence('signature', 'passed', { keyId: manifest.signature.keyId }));
+    } catch (error) {
+      releaseEvidence.push(evidence('signature', 'failed', { reason: safeMessage(error) }));
+      return rejectedRelease(job, releaseEvidence, 'Web release signature validation failed');
+    }
   }
 
   const validationRoot = await mkdtemp(join(tmpdir(), 'awesome-workflow-validation-'));
@@ -78,7 +86,9 @@ export async function validateRelease(
           }
         : undefined;
     for (const artifact of job.artifacts) {
-      artifactResults.push(await validateArtifact(artifact, validationRoot, config, federationEntry));
+      artifactResults.push(
+        await validateArtifact(artifact, validationRoot, config, manifest.kind === 'web', federationEntry),
+      );
     }
     return {
       releaseId: job.releaseId,
@@ -98,6 +108,7 @@ async function validateArtifact(
   artifact: ArtifactJob,
   validationRoot: string,
   config: WorkerConfig,
+  requirePublisherSignature: boolean,
   federationEntry?: { fileName: string; sha256: string },
 ): Promise<ArtifactResult> {
   const checks: ValidationEvidence[] = [];
@@ -120,8 +131,13 @@ async function validateArtifact(
     }
     checks.push(evidence('digest', 'passed', { bytes: actualSize, sha256: actualSha256 }));
 
-    verifyPublisherSignature(Buffer.from(actualSha256, 'hex'), artifact.signature, config.signingKeys);
-    checks.push(evidence('signature', 'passed', { keyId: artifact.signature.keyId }));
+    if (requirePublisherSignature) {
+      if (!artifact.signature) {
+        throw new ValidationError('signature', 'Web release artifact is missing its publisher signature');
+      }
+      verifyPublisherSignature(Buffer.from(actualSha256, 'hex'), artifact.signature, config.signingKeys);
+      checks.push(evidence('signature', 'passed', { keyId: artifact.signature.keyId }));
+    }
 
     const sbomUrl = readSbomUrl(artifact.sbom);
     const sbom = await downloadObject(
@@ -325,7 +341,7 @@ async function downloadObject(
 
 export function verifyPublisherSignature(
   digest: Uint8Array,
-  signature: ArtifactJob['signature'],
+  signature: NonNullable<ArtifactJob['signature']>,
   keys: ReadonlyMap<string, import('node:crypto').KeyObject>,
 ): void {
   const key = keys.get(signature.keyId);

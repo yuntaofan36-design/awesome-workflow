@@ -53,6 +53,7 @@ export const useDesktopStore = create<DesktopState>()((set, get) => ({
       set({ validatedManifest: await desktopHost.validateDevelopmentApplet(path), loading: false });
     } catch (error) {
       set({ error: normalizeUiError(error, 'applet_validation_failed'), loading: false });
+      throw error;
     }
   },
   registerDirectory: async (path) => {
@@ -65,6 +66,7 @@ export const useDesktopStore = create<DesktopState>()((set, get) => ({
         error: normalizeUiError(error, 'development_applet_registration_failed'),
         loading: false,
       });
+      throw error;
     }
   },
 }));

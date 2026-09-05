@@ -15,6 +15,7 @@ import {
   ClaimRunsResultSchema,
   CliAuthorizationInputSchema,
   CliAuthorizationResultSchema,
+  CliPasswordLoginInputSchema,
   CliRefreshTokenInputSchema,
   CliRefreshTokenResultSchema,
   CliSessionResultSchema,
@@ -242,6 +243,16 @@ register(
     body: jsonBody(PasswordLoginInputSchema),
   },
   success(schemas.CurrentUser),
+  [],
+);
+register(
+  'post',
+  '/api/v1/auth/cli/password',
+  'loginWithDesktopPassword',
+  {
+    body: jsonBody(CliPasswordLoginInputSchema),
+  },
+  success(CliSessionResultSchema),
   [],
 );
 register(

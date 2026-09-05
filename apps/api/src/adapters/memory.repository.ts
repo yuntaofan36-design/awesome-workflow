@@ -1343,7 +1343,7 @@ export class MemoryPlatformRepository implements PlatformRepository {
         version: input.version,
         manifest: input.manifest,
         manifestSha256: input.manifestSha256,
-        signature: input.signature,
+        ...(input.signature ? { signature: input.signature } : {}),
         sbom: input.sbom,
         validationEvidence: [],
         status: 'draft',

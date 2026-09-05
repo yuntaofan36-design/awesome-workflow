@@ -13,6 +13,7 @@ type SessionState = {
   error: UiError | null;
   initialize: () => Promise<void>;
   login: (locale: 'en-US' | 'zh-CN') => Promise<void>;
+  loginWithPassword: (email: string, password: string, locale: 'en-US' | 'zh-CN') => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -67,6 +68,20 @@ export const useSessionStore = create<SessionState>()((set) => ({
       });
     }
   },
+  loginWithPassword: async (email, password, locale) => {
+    set({ loading: true, error: null });
+    try {
+      const session = await sessionApi.loginWithPassword(email, password, locale);
+      set({ user: session.user, expiresAt: session.expiresAt, loading: false });
+    } catch (error) {
+      set({
+        user: null,
+        expiresAt: null,
+        error: normalizeUiError(error, 'sign_in_failed'),
+        loading: false,
+      });
+    }
+  },
   logout: async () => {
     try {
       await sessionApi.logout();
@@ -89,4 +104,5 @@ export const selectProviders = (state: SessionState) => state.providers;
 export const selectSessionError = (state: SessionState) => state.error;
 export const selectInitializeSession = (state: SessionState) => state.initialize;
 export const selectLogin = (state: SessionState) => state.login;
+export const selectLoginWithPassword = (state: SessionState) => state.loginWithPassword;
 export const selectLogout = (state: SessionState) => state.logout;

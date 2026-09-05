@@ -235,7 +235,7 @@ export const InstallationSyncArtifactSchema = z.object({
   sha256: Sha256Schema,
   downloadUrl: z.string().url(),
   downloadExpiresAt: TimestampSchema,
-  attestation: PublisherSignatureSchema,
+  attestation: PublisherSignatureSchema.optional(),
 });
 export type InstallationSyncArtifact = z.infer<typeof InstallationSyncArtifactSchema>;
 

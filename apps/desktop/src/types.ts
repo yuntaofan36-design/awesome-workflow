@@ -42,7 +42,7 @@ export type AppletManifest = {
   version: string;
   artifacts: ManifestArtifact[];
   integrity: { algorithm: 'sha256'; digest: string };
-  signature: { algorithm: 'ed25519'; keyId: string; value: string };
+  signature?: { algorithm: 'ed25519'; keyId: string; value: string };
   kind: 'desktop';
   name: string;
   description: string;

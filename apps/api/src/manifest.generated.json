@@ -464,9 +464,6 @@
             "integrity": {
               "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/integrity"
             },
-            "signature": {
-              "$ref": "#/definitions/AwesomeWorkflowManifest/anyOf/0/anyOf/0/properties/signature"
-            },
             "kind": {
               "type": "string",
               "const": "desktop"
@@ -983,7 +980,6 @@
             "appId",
             "version",
             "integrity",
-            "signature",
             "kind",
             "name",
             "description",

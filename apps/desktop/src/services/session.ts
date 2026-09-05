@@ -6,6 +6,7 @@ import { getDesktopRequestLocale } from '../i18n/requestLocale';
 export type AuthProvider = {
   id: 'email' | 'password' | 'google' | 'feishu' | 'wechat';
   label: string;
+  labelKey: `auth.provider.${AuthProvider['id']}`;
   protocol: 'email_otp' | 'password' | 'oidc';
   status: 'active' | 'configured' | 'disabled';
   strategy?: 'local_email_otp' | 'local_password' | 'oidc_broker';
@@ -39,6 +40,12 @@ export const sessionApi = {
   login: async (locale: 'en-US' | 'zh-CN') => {
     requireDesktopRuntime();
     return invoke<DesktopSession>('desktop_session_login', { input: { locale } });
+  },
+  loginWithPassword: async (email: string, password: string, locale: 'en-US' | 'zh-CN') => {
+    requireDesktopRuntime();
+    return invoke<DesktopSession>('desktop_session_password_login', {
+      input: { email, password, locale },
+    });
   },
   logout: async () => {
     requireDesktopRuntime();

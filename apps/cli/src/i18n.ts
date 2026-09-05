@@ -77,7 +77,7 @@ Usage:
   aw [--locale en-US|zh-CN] login [--api URL] [--ci-oidc-env NAME]
   aw [--locale en-US|zh-CN] init --kind web|desktop --app-id SLUG [--name NAME] [--output FILE]
   aw [--locale en-US|zh-CN] dev [--manifest FILE] [--cwd DIR] -- COMMAND [ARG ...]
-  aw [--locale en-US|zh-CN] package --key-id ID (--private-key FILE | --private-key-env NAME)
+  aw [--locale en-US|zh-CN] package [--key-id ID] [--private-key FILE | --private-key-env NAME]
              [--manifest FILE] [--input DIR | --artifact-map FILE] [--output DIR]
   aw [--locale en-US|zh-CN] publish --application-id UUID [--package FILE] [--api URL] [--token-env NAME]
   aw [--locale en-US|zh-CN] promote --application-id UUID --release-id UUID --channel dev|canary|stable
@@ -90,7 +90,8 @@ Security defaults:
   - login uses a 127.0.0.1 ephemeral callback, PKCE S256, and strict state validation;
   - private keys and tokens are never printed;
   - dev commands execute as an argv vector without a shell;
-  - package emits a deterministic ZIP, CycloneDX and SPDX SBOMs, and Ed25519 signatures.`;
+  - package emits a deterministic ZIP plus CycloneDX and SPDX SBOMs;
+  - Web packages additionally require an Ed25519 publisher signature; desktop packages do not.`;
 
 const HELP_ZH = `Awesome Workflow CLI
 
@@ -98,7 +99,7 @@ const HELP_ZH = `Awesome Workflow CLI
   aw [--locale en-US|zh-CN] login [--api URL] [--ci-oidc-env NAME]
   aw [--locale en-US|zh-CN] init --kind web|desktop --app-id SLUG [--name NAME] [--output FILE]
   aw [--locale en-US|zh-CN] dev [--manifest FILE] [--cwd DIR] -- COMMAND [ARG ...]
-  aw [--locale en-US|zh-CN] package --key-id ID (--private-key FILE | --private-key-env NAME)
+  aw [--locale en-US|zh-CN] package [--key-id ID] [--private-key FILE | --private-key-env NAME]
              [--manifest FILE] [--input DIR | --artifact-map FILE] [--output DIR]
   aw [--locale en-US|zh-CN] publish --application-id UUID [--package FILE] [--api URL] [--token-env NAME]
   aw [--locale en-US|zh-CN] promote --application-id UUID --release-id UUID --channel dev|canary|stable
@@ -111,7 +112,8 @@ const HELP_ZH = `Awesome Workflow CLI
   - 登录使用 127.0.0.1 临时回调、PKCE S256 和严格 state 校验；
   - 永不输出私钥和令牌；
   - 开发命令以 argv 数组直接执行，不经过 shell；
-  - 打包输出确定性 ZIP、CycloneDX/SPDX SBOM 和 Ed25519 签名。`;
+  - 打包输出确定性 ZIP 和 CycloneDX/SPDX SBOM；
+  - Web 软件包额外要求 Ed25519 发布者签名，桌面软件包无需签名。`;
 
 const enUS: Record<string, string> = {
   help: HELP_EN,
@@ -122,6 +124,7 @@ const enUS: Record<string, string> = {
   'success.authenticated': 'Authenticated as {email}; session expires {expiresAt}.',
   'success.manifestCreated':
     'Created {kind} manifest {path}. Signing remains unconfigured until `aw package`.',
+  'success.desktopManifestCreated': 'Created unsigned {kind} manifest {path}.',
   'success.packaged': 'Packaged {count} artifact(s): {summary}. Metadata: {path}',
   'success.artifactSummary': '{name}={fileName} ({size} bytes, sha256 {sha256})',
   'manifest.desktopDescription': 'Desktop micro-application',
@@ -196,14 +199,14 @@ const enUS: Record<string, string> = {
   'package.artifactMapEmpty': 'Artifact map must contain at least one artifact.',
   'package.artifactMapEntry': 'Artifact map entry {index} must contain a valid name and input path.',
   'package.keyId': '--key-id must contain 1 to 160 characters.',
+  'package.webSignatureRequired': 'Web package metadata requires a publisher signature for every artifact.',
   'package.metadataUnreadable': 'Package metadata is missing or invalid. Run `aw package` first.',
-  'package.metadataArtifactSet':
-    'Package metadata does not contain the complete signed manifest artifact set.',
+  'package.metadataArtifactSet': 'Package metadata does not contain the complete manifest artifact set.',
   'package.artifactBytesChanged':
     'Packaged artifact {name} bytes no longer match package metadata. Re-run `aw package`.',
   'package.sbomBytesChanged':
     'Packaged SBOM for {name} no longer matches package metadata. Re-run `aw package`.',
-  'package.metadataDeclaration': 'Package metadata does not match the signed manifest artifact declaration.',
+  'package.metadataDeclaration': 'Package metadata does not match the manifest artifact declaration.',
   'package.keyExactlyOne': 'Provide exactly one of --private-key PATH or --private-key-env NAME.',
   'package.keyNotFile': 'Publisher private key path is not a regular file.',
   'package.keyPermissions':
@@ -282,6 +285,7 @@ const zhCN: Record<string, string> = {
   'command.unknown': '未知命令：{command}。运行 `aw help` 查看用法。',
   'success.authenticated': '已以 {email} 登录；会话将在 {expiresAt} 过期。',
   'success.manifestCreated': '已创建 {kind} Manifest：{path}。运行 `aw package` 前签名尚未配置。',
+  'success.desktopManifestCreated': '已创建无签名 {kind} Manifest：{path}。',
   'success.packaged': '已打包 {count} 个制品：{summary}。元数据：{path}',
   'success.artifactSummary': '{name}={fileName}（{size} 字节，sha256 {sha256}）',
   'manifest.desktopDescription': '桌面微应用',
@@ -351,11 +355,12 @@ const zhCN: Record<string, string> = {
   'package.artifactMapEmpty': '制品映射必须至少包含一个制品。',
   'package.artifactMapEntry': '制品映射第 {index} 项必须包含有效名称和输入路径。',
   'package.keyId': '--key-id 长度必须为 1 到 160 个字符。',
+  'package.webSignatureRequired': 'Web 软件包元数据要求每个制品都包含发布者签名。',
   'package.metadataUnreadable': '软件包元数据不存在或无效，请先运行 `aw package`。',
-  'package.metadataArtifactSet': '软件包元数据未包含已签名 Manifest 的完整制品集合。',
+  'package.metadataArtifactSet': '软件包元数据未包含 Manifest 的完整制品集合。',
   'package.artifactBytesChanged': '已打包制品 {name} 的内容与软件包元数据不再匹配，请重新运行 `aw package`。',
   'package.sbomBytesChanged': '制品 {name} 的 SBOM 与软件包元数据不再匹配，请重新运行 `aw package`。',
-  'package.metadataDeclaration': '软件包元数据与已签名 Manifest 的制品声明不匹配。',
+  'package.metadataDeclaration': '软件包元数据与 Manifest 的制品声明不匹配。',
   'package.keyExactlyOne': '--private-key PATH 与 --private-key-env NAME 必须且只能提供一个。',
   'package.keyNotFile': '发布者私钥路径不是普通文件。',
   'package.keyPermissions': '发布者私钥文件不能允许用户组或其他用户读取（预期权限 0600）。',

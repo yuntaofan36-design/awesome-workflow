@@ -31,4 +31,4 @@ commands.allow = ["apply_schedule_snapshot", "mark_schedule_offline"]
 [[permission]]
 identifier = "desktop-auth"
 description = "Use the Rust-owned public-client session, read-only API broker, and one-time device enrollment boundary."
-commands.allow = ["desktop_session_current", "desktop_auth_providers", "desktop_session_login", "desktop_session_logout", "desktop_api_request", "desktop_device_enroll"]
+commands.allow = ["desktop_session_current", "desktop_auth_providers", "desktop_session_login", "desktop_session_password_login", "desktop_session_logout", "desktop_api_request", "desktop_device_enroll"]

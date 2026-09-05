@@ -4,7 +4,6 @@ import {
   ApplicationSlugSchema,
   DesktopCapabilitySchema,
   DesktopReleaseManifestSchema,
-  PublisherSignatureSchema,
   SemanticVersionSchema,
   Sha256Schema,
   WebCapabilitySchema,
@@ -104,7 +103,6 @@ export const DesktopAppSchema = z.object({
       version: VersionSchema,
       artifactUrl: HttpUrlSchema,
       sha256: Sha256Schema,
-      signature: PublisherSignatureSchema,
       channel: ReleaseChannelSchema,
       manifest: DesktopManifestSchema,
       createdAt: z.string().datetime(),
@@ -126,7 +124,6 @@ export type CreateDesktopAppInput = z.infer<typeof CreateDesktopAppInputSchema>;
 export const PublishDesktopReleaseInputSchema = z.object({
   artifactUrl: HttpUrlSchema,
   sha256: Sha256Schema,
-  signature: PublisherSignatureSchema,
   channel: ReleaseChannelSchema.default('dev'),
   manifest: DesktopManifestSchema,
 });

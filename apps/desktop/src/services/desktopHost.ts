@@ -3,6 +3,13 @@ import { invoke } from '@tauri-apps/api/core';
 import type { AgentSnapshot, AppletManifest, EnrolledDevice, RunAppletResult } from '@/types';
 import { getDesktopRequestLocale } from '../i18n/requestLocale';
 
+export type DesktopPublishResult = {
+  releaseId: string;
+  version: string;
+  status: string;
+  artifacts: Array<{ fileName: string; status: string }>;
+};
+
 export type AgentLocaleSettings = {
   locale: 'en-US' | 'zh-CN';
   fallbackLocales: Array<'en-US' | 'zh-CN'>;
@@ -43,7 +50,6 @@ const browserSnapshot: AgentSnapshot = {
           },
         ],
         integrity: { algorithm: 'sha256', digest: 'b'.repeat(64) },
-        signature: { algorithm: 'ed25519', keyId: 'demo-key', value: 'c'.repeat(64) },
         kind: 'desktop',
         runtimes: [
           {
@@ -116,13 +122,22 @@ export const desktopHost = {
       ? invoke<AppletManifest>('validate_development_applet', { path })
       : Promise.resolve(browserSnapshot.installed[0]!.manifest),
   registerDevelopmentApplet: (path: string) => invoke('register_development_applet', { path }),
-  installSignedPackage: (input: {
+  installPackage: (input: {
     packagePath: string;
     sha256: string;
-    signature: string;
-    keyId: string;
     manifest: AppletManifest;
-  }) => invoke('install_signed_package', { input }),
+  }) => invoke('install_package', { input }),
+  publishDesktopPackage: (input: { applicationId: string; metadataPath: string }) =>
+    isTauriRuntime()
+      ? invoke<DesktopPublishResult>('developer_publish_package', {
+          input: { ...input, locale: getDesktopRequestLocale() },
+        })
+      : Promise.resolve<DesktopPublishResult>({
+          releaseId: crypto.randomUUID(),
+          version: '0.4.0',
+          status: 'validating',
+          artifacts: [{ fileName: 'hello-runner-0.4.0.zip', status: 'uploaded' }],
+        }),
   runApplet: (appId: string, version?: string) =>
     isTauriRuntime()
       ? invoke<RunAppletResult>('run_applet', { input: { appId, version, args: [] } })
@@ -151,6 +166,17 @@ export const desktopHost = {
       multiple: false,
       title,
       filters: [{ name: filterName, extensions: ['awpkg'] }],
+    });
+    return selected ?? null;
+  },
+  choosePackageMetadata: async (title: string, filterName: string) => {
+    if (!isTauriRuntime()) return 'C:\\dev\\hello-runner\\.aw\\package.json';
+    const { open } = await loadDialog();
+    const selected = await open({
+      directory: false,
+      multiple: false,
+      title,
+      filters: [{ name: filterName, extensions: ['json'] }],
     });
     return selected ?? null;
   },

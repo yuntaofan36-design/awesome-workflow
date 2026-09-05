@@ -24,7 +24,7 @@ export async function publishPackagedRelease(options: {
     {
       version: packaged.manifest.version,
       manifest: packaged.manifest,
-      signature: packaged.manifest.signature,
+      ...(packaged.manifest.kind === 'web' ? { signature: packaged.manifest.signature } : {}),
       // Release.sbom is retained for API v1 compatibility. Validation consumes
       // the per-artifact SBOM descriptors uploaded below.
       sbom: packaged.artifacts[0]!.metadata.sbom.primary.descriptor,
@@ -41,7 +41,7 @@ export async function publishPackagedRelease(options: {
         contentType: artifact.contentType,
         size: artifact.size,
         sha256: artifact.sha256,
-        signature: artifact.signature,
+        ...(packaged.manifest.kind === 'web' && artifact.signature ? { signature: artifact.signature } : {}),
         sbom: artifact.sbom.primary.descriptor,
       },
     );

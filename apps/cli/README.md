@@ -7,22 +7,25 @@ tokens.
 ## Commands
 
 ```powershell
-# Create a Module Federation manifest template. The template is explicitly
-# unsigned; package will replace its signing envelope.
+# Create a Module Federation manifest template. The template has an explicit
+# unsigned placeholder; package will replace its signing envelope.
 pnpm aw init --kind web --app-id example-app
+
+# Desktop manifests and packages do not contain publisher signatures.
+pnpm aw init --kind desktop --app-id desktop-example
 
 # Validate the manifest, then execute an argv vector without a shell.
 pnpm aw dev -- pnpm dev
 
-# Package dist/ into a deterministic ZIP and emit both CycloneDX and SPDX.
-# The key file must be Ed25519 PKCS#8 PEM (or base64 DER in an environment
-# variable). init never creates a publisher key.
+# Package a Web build into a deterministic ZIP and emit both CycloneDX and
+# SPDX. Web packages require an Ed25519 PKCS#8 publisher key (or base64 DER
+# supplied through an environment variable).
 pnpm aw package --key-id publisher-2026 --private-key C:\secure\publisher.pem
 
 # Package every artifact declared by a desktop manifest in one operation.
 # Paths in the map are resolved relative to the map file.
 pnpm aw package --manifest .\applet.json --artifact-map .\aw.package.json `
-  --output .\.aw --key-id publisher-2026 --private-key C:\secure\publisher.pem
+  --output .\.aw
 
 # Upload every artifact + primary SBOM pair, finalize all, then submit once.
 pnpm aw login --api http://127.0.0.1:4100
@@ -89,7 +92,7 @@ single-input format; schema version 2 contains a sorted `artifacts` array for a
 complete multi-artifact release:
 
 - one deterministic, uncompressed ZIP per artifact;
-- the signed release manifest;
+- the release manifest (signed for Web, unsigned for desktop);
 - a CycloneDX JSON SBOM per artifact used by the upload contract; and
 - an SPDX 2.3 JSON SBOM per artifact, also embedded in its ZIP alongside CycloneDX.
 
@@ -104,8 +107,10 @@ measured digest in its path. `resourceOrigins` contains exact HTTPS origins
 CSP must name exactly those origins for scripts, styles, and manifest fetches.
 Desktop artifact maps must cover the manifest's complete artifact set, and
 each artifact input must contain the runtime entries that reference it. The
-manifest is signed only after every immutable artifact descriptor has been
-derived.
+desktop manifest and artifact metadata remain unsigned; the control plane binds
+them to the authenticated publisher, immutable SHA-256 digests, and uploaded
+object sizes. Web manifests are signed only after every immutable artifact
+descriptor has been derived.
 
 The shared `UploadIntentSchema` declares separate presigned PUT targets for the
 artifact and primary SBOM. Publishing treats both as mandatory, stops before an

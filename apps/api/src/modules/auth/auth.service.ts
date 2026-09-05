@@ -97,24 +97,13 @@ export class AuthService {
   }
 
   async loginPassword(email: string, password: string, clientIp: string): Promise<AuthSessionResult> {
-    if (!this.passwordAuthenticationEnabled()) {
-      throw new DomainError(404, 'password_auth_disabled', 'Administrator password login is disabled');
-    }
-    const normalizedEmail = email.trim().toLowerCase();
-    await this.rateLimiter.consumePasswordLogin({ email: normalizedEmail, clientIp, now: new Date() });
-    if (!(await this.passwordCredentialsMatch(normalizedEmail, password))) {
-      throw new DomainError(401, 'invalid_credentials', 'Invalid email or password');
-    }
-    return this.completeIdentity(
-      {
-        issuer: 'local-password-admin',
-        subject: this.config.AUTH_PASSWORD_ADMIN_EMAIL!,
-        email: this.config.AUTH_PASSWORD_ADMIN_EMAIL!,
-        displayName: this.config.AUTH_PASSWORD_ADMIN_EMAIL!.split('@')[0] || 'admin',
-      },
-      SESSION_TTL_MS,
-      ['platform_admin'],
-    );
+    const user = await this.authenticatePasswordAdministrator(email, password, clientIp);
+    return this.issueSession(user, SESSION_TTL_MS);
+  }
+
+  async loginPasswordForCli(email: string, password: string, clientIp: string): Promise<CliSessionResult> {
+    const user = await this.authenticatePasswordAdministrator(email, password, clientIp);
+    return this.issueRefreshSession(user);
   }
 
   async requestEmailCode(
@@ -392,6 +381,28 @@ export class AuthService {
 
   private hashCliCode(code: string): string {
     return createHmac('sha256', this.config.SESSION_SECRET).update(`cli-code:${code}`).digest('hex');
+  }
+
+  private async authenticatePasswordAdministrator(
+    email: string,
+    password: string,
+    clientIp: string,
+  ): Promise<CurrentUser> {
+    if (!this.passwordAuthenticationEnabled()) {
+      throw new DomainError(404, 'password_auth_disabled', 'Administrator password login is disabled');
+    }
+    const normalizedEmail = email.trim().toLowerCase();
+    await this.rateLimiter.consumePasswordLogin({ email: normalizedEmail, clientIp, now: new Date() });
+    if (!(await this.passwordCredentialsMatch(normalizedEmail, password))) {
+      throw new DomainError(401, 'invalid_credentials', 'Invalid email or password');
+    }
+    return this.repository.upsertIdentity({
+      issuer: 'local-password-admin',
+      subject: this.config.AUTH_PASSWORD_ADMIN_EMAIL!,
+      email: this.config.AUTH_PASSWORD_ADMIN_EMAIL!,
+      displayName: this.config.AUTH_PASSWORD_ADMIN_EMAIL!.split('@')[0] || 'admin',
+      platformRoles: ['platform_admin'],
+    });
   }
 
   private passwordProvider(): AuthProvider {

@@ -3,6 +3,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 
 import {
   CliAuthorizationInputSchema,
+  CliPasswordLoginInputSchema,
   CliRefreshTokenInputSchema,
   CliTokenInputSchema,
   OidcAuthorizationInputSchema,
@@ -52,6 +53,18 @@ export class AuthController {
     const session = await this.auth.loginPassword(input.email, input.password, request.ip);
     this.writeSessionCookie(reply, session.accessToken, session.expiresAt);
     return { data: session.user };
+  }
+
+  @Public()
+  @Post('cli/password')
+  @HttpCode(200)
+  async loginPasswordForCli(
+    @Body(new ZodPipe(CliPasswordLoginInputSchema)) input: z.infer<typeof CliPasswordLoginInputSchema>,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    reply.header('cache-control', 'no-store').header('pragma', 'no-cache');
+    return { data: await this.auth.loginPasswordForCli(input.email, input.password, request.ip) };
   }
 
   @Public()

@@ -14,14 +14,20 @@ test('publish preserves create, upload, finalize, submit ordering including the 
   const fixture = await createPackageFixture();
   const calls: string[] = [];
   const languageHeaders: Array<{ host: string; language: string | null }> = [];
+  let releaseBody: Record<string, unknown> | undefined;
+  let artifactBody: Record<string, unknown> | undefined;
   const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url);
     const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
     const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
     calls.push(`${method} ${url.pathname}`);
     languageHeaders.push({ host: url.hostname, language: headers.get('accept-language') });
-    if (url.pathname.endsWith('/releases') && method === 'POST') return json({ id: 'release-1' });
+    if (url.pathname.endsWith('/releases') && method === 'POST') {
+      releaseBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return json({ id: 'release-1' });
+    }
     if (url.pathname.endsWith('/artifacts') && method === 'POST') {
+      artifactBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
       return json({
         artifact: { id: 'artifact-1' },
         upload: {
@@ -59,6 +65,8 @@ test('publish preserves create, upload, finalize, submit ordering including the 
       }),
     );
     assert.equal(summary.status, 'validating');
+    assert.equal(Object.hasOwn(releaseBody!, 'signature'), true);
+    assert.equal(Object.hasOwn(artifactBody!, 'signature'), true);
     assert.deepEqual(calls, [
       'POST /api/v1/applications/application-1/releases',
       'POST /api/v1/releases/release-1/artifacts',
@@ -84,16 +92,22 @@ test('publish preserves create, upload, finalize, submit ordering including the 
   }
 });
 
-test('publish uploads and finalizes every artifact before submitting one multi-platform release', async () => {
+test('desktop publish omits publisher signatures and submits one complete multi-platform release', async () => {
   const fixture = await createMultiPackageFixture();
   const calls: string[] = [];
+  const releaseBodies: Array<Record<string, unknown>> = [];
+  const artifactBodies: Array<Record<string, unknown>> = [];
   let artifactSequence = 0;
   const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url);
     const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
     calls.push(`${method} ${url.pathname}`);
-    if (url.pathname.endsWith('/releases') && method === 'POST') return json({ id: 'release-1' });
+    if (url.pathname.endsWith('/releases') && method === 'POST') {
+      releaseBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return json({ id: 'release-1' });
+    }
     if (url.pathname.endsWith('/artifacts') && method === 'POST') {
+      artifactBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
       artifactSequence += 1;
       return json({
         artifact: { id: `artifact-${artifactSequence}` },
@@ -131,6 +145,14 @@ test('publish uploads and finalizes every artifact before submitting one multi-p
       metadataPath: fixture.metadataPath,
     });
     assert.equal(summary.artifacts.length, 2);
+    assert.equal(releaseBodies.length, 1);
+    assert.equal(Object.hasOwn(releaseBodies[0]!, 'signature'), false);
+    assert.equal(Object.hasOwn(releaseBodies[0]!.manifest as Record<string, unknown>, 'signature'), false);
+    assert.equal(artifactBodies.length, 2);
+    assert.equal(
+      artifactBodies.every((body) => !Object.hasOwn(body, 'signature')),
+      true,
+    );
     assert.deepEqual(calls, [
       'POST /api/v1/applications/application-1/releases',
       'POST /api/v1/releases/release-1/artifacts',
@@ -239,9 +261,7 @@ async function createMultiPackageFixture(): Promise<{
   const windowsInput = join(directory, 'windows');
   const macosInput = join(directory, 'macos');
   const manifestPath = join(directory, 'manifest.json');
-  const keyPath = join(directory, 'key.pem');
   const output = join(directory, 'package');
-  const { privateKey } = generateKeyPairSync('ed25519');
   await mkdir(join(windowsInput, 'bin'), { recursive: true });
   await mkdir(join(macosInput, 'bin'), { recursive: true });
   await writeFile(join(windowsInput, 'bin', 'app.exe'), 'windows');
@@ -274,11 +294,6 @@ async function createMultiPackageFixture(): Promise<{
         },
       ],
       integrity: { algorithm: 'sha256', digest: '0'.repeat(64) },
-      signature: {
-        algorithm: 'ed25519',
-        keyId: 'unconfigured-publisher-key',
-        value: 'UNSIGNED_TEMPLATE_REPLACED_BY_AW_PACKAGE_000000000000000000000000',
-      },
       runtimes: [
         {
           kind: 'native',
@@ -299,7 +314,6 @@ async function createMultiPackageFixture(): Promise<{
       minHostVersion: '0.1.0',
     }),
   );
-  await writeFile(keyPath, privateKey.export({ format: 'pem', type: 'pkcs8' }), { mode: 0o600 });
   const packaged = await packageRelease({
     manifestPath,
     artifactInputs: [
@@ -307,8 +321,6 @@ async function createMultiPackageFixture(): Promise<{
       { name: 'macos-arm64', inputDirectory: macosInput },
     ],
     outputDirectory: output,
-    keyId: 'publisher',
-    privateKeyPath: keyPath,
   });
   return {
     metadataPath: packaged.metadataPath,

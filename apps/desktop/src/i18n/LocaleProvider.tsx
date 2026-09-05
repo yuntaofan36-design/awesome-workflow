@@ -4,6 +4,8 @@ import { ConfigProvider, Message } from '@arco-design/web-react';
 import arcoEnUS from '@arco-design/web-react/es/locale/en-US';
 import arcoZhCN from '@arco-design/web-react/es/locale/zh-CN';
 
+import '@arco-design/web-react/es/Message/style/css.js';
+
 import {
   createLocaleSnapshot,
   formatBytes as formatLocaleBytes,

@@ -307,7 +307,6 @@
           "contentType",
           "size",
           "sha256",
-          "signature",
           "sbom",
           "id",
           "releaseId",
@@ -1869,7 +1868,6 @@
                 "contentType",
                 "size",
                 "sha256",
-                "signature",
                 "sbom",
                 "id",
                 "releaseId",
@@ -2660,7 +2658,6 @@
               "contentType",
               "size",
               "sha256",
-              "signature",
               "sbom",
               "id",
               "releaseId",
@@ -3055,6 +3052,250 @@
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/CurrentUser"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not authorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/cli/password": {
+      "post": {
+        "operationId": "loginWithDesktopPassword",
+        "tags": [
+          "Authentication"
+        ],
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "maxLength": 254,
+                    "format": "email"
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024
+                  },
+                  "clientId": {
+                    "type": "string",
+                    "enum": [
+                      "awesome-workflow-desktop"
+                    ]
+                  }
+                },
+                "required": [
+                  "email",
+                  "password",
+                  "clientId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "accessToken": {
+                          "type": "string",
+                          "minLength": 32
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "user": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "email": {
+                              "type": "string",
+                              "maxLength": 254,
+                              "format": "email"
+                            },
+                            "displayName": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            },
+                            "platformRoles": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "enum": [
+                                  "platform_admin",
+                                  "official_reviewer"
+                                ]
+                              },
+                              "default": []
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "email",
+                            "displayName"
+                          ]
+                        },
+                        "refreshToken": {
+                          "type": "string",
+                          "minLength": 43,
+                          "maxLength": 16384
+                        },
+                        "tokenType": {
+                          "type": "string",
+                          "enum": [
+                            "Bearer"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "accessToken",
+                        "expiresAt",
+                        "user",
+                        "tokenType"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "accessToken": {
+                          "type": "string",
+                          "minLength": 32
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "user": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "email": {
+                              "type": "string",
+                              "maxLength": 254,
+                              "format": "email"
+                            },
+                            "displayName": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            },
+                            "platformRoles": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "enum": [
+                                  "platform_admin",
+                                  "official_reviewer"
+                                ]
+                              },
+                              "default": []
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "email",
+                            "displayName"
+                          ]
+                        },
+                        "refreshToken": {
+                          "type": "string",
+                          "minLength": 43,
+                          "maxLength": 16384
+                        },
+                        "tokenType": {
+                          "type": "string",
+                          "enum": [
+                            "Bearer"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "accessToken",
+                        "expiresAt",
+                        "user",
+                        "tokenType"
+                      ]
                     }
                   },
                   "required": [
@@ -5929,32 +6170,6 @@
                                               "digest"
                                             ]
                                           },
-                                          "signature": {
-                                            "type": "object",
-                                            "properties": {
-                                              "algorithm": {
-                                                "type": "string",
-                                                "enum": [
-                                                  "ed25519"
-                                                ]
-                                              },
-                                              "keyId": {
-                                                "type": "string",
-                                                "minLength": 1,
-                                                "maxLength": 160
-                                              },
-                                              "value": {
-                                                "type": "string",
-                                                "minLength": 40,
-                                                "maxLength": 256
-                                              }
-                                            },
-                                            "required": [
-                                              "algorithm",
-                                              "keyId",
-                                              "value"
-                                            ]
-                                          },
                                           "kind": {
                                             "type": "string",
                                             "enum": [
@@ -6569,7 +6784,6 @@
                                           "appId",
                                           "version",
                                           "integrity",
-                                          "signature",
                                           "kind",
                                           "name",
                                           "description",
@@ -6646,8 +6860,7 @@
                                           "size",
                                           "sha256",
                                           "downloadUrl",
-                                          "downloadExpiresAt",
-                                          "attestation"
+                                          "downloadExpiresAt"
                                         ]
                                       }
                                     },
@@ -6859,32 +7072,6 @@
                                               "digest"
                                             ]
                                           },
-                                          "signature": {
-                                            "type": "object",
-                                            "properties": {
-                                              "algorithm": {
-                                                "type": "string",
-                                                "enum": [
-                                                  "ed25519"
-                                                ]
-                                              },
-                                              "keyId": {
-                                                "type": "string",
-                                                "minLength": 1,
-                                                "maxLength": 160
-                                              },
-                                              "value": {
-                                                "type": "string",
-                                                "minLength": 40,
-                                                "maxLength": 256
-                                              }
-                                            },
-                                            "required": [
-                                              "algorithm",
-                                              "keyId",
-                                              "value"
-                                            ]
-                                          },
                                           "kind": {
                                             "type": "string",
                                             "enum": [
@@ -7499,7 +7686,6 @@
                                           "appId",
                                           "version",
                                           "integrity",
-                                          "signature",
                                           "kind",
                                           "name",
                                           "description",
@@ -7576,8 +7762,7 @@
                                           "size",
                                           "sha256",
                                           "downloadUrl",
-                                          "downloadExpiresAt",
-                                          "attestation"
+                                          "downloadExpiresAt"
                                         ]
                                       }
                                     },
@@ -14286,7 +14471,6 @@
                   "contentType",
                   "size",
                   "sha256",
-                  "signature",
                   "sbom"
                 ]
               }

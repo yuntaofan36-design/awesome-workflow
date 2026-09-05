@@ -137,7 +137,13 @@ async function initCommand(args: readonly string[], runtime: CliRuntime): Promis
   const appId = requiredStringOption(values, 'app-id');
   const outputPath = resolve(runtime.cwd, stringOption(values, 'output') ?? 'awesome-workflow.manifest.json');
   const manifest = await initializeManifest({ kind, appId, name: stringOption(values, 'name'), outputPath });
-  writeLine(runtime.stdout, cliText('success.manifestCreated', { kind: manifest.kind, path: outputPath }));
+  writeLine(
+    runtime.stdout,
+    cliText(manifest.kind === 'web' ? 'success.manifestCreated' : 'success.desktopManifestCreated', {
+      kind: manifest.kind,
+      path: outputPath,
+    }),
+  );
 }
 
 async function devCommand(args: readonly string[], runtime: CliRuntime): Promise<number> {
@@ -186,7 +192,7 @@ async function packageCommand(
       ? { artifactInputs: await readArtifactInputMap(artifactMapPath) }
       : { inputDirectory: resolve(runtime.cwd, inputOption ?? 'dist') }),
     outputDirectory: resolve(runtime.cwd, stringOption(values, 'output') ?? '.aw'),
-    keyId: requiredStringOption(values, 'key-id'),
+    keyId: stringOption(values, 'key-id'),
     privateKeyPath: resolveOptional(runtime.cwd, stringOption(values, 'private-key')),
     privateKeyEnvironmentName: stringOption(values, 'private-key-env'),
     artifactName,

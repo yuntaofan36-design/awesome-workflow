@@ -6,7 +6,7 @@ const WorkerEnvironmentSchema = z.object({
   REDIS_URL: z.string().url(),
   WORKER_API_BASE_URL: z.string().url(),
   WORKER_CALLBACK_TOKEN: z.string().min(32),
-  RELEASE_SIGNING_PUBLIC_KEYS: z.string().min(1),
+  RELEASE_SIGNING_PUBLIC_KEYS: z.string().default('{}'),
   ARTIFACT_ALLOWED_ORIGINS: z.string().min(1),
   ARTIFACT_MAX_BYTES: z.coerce
     .number()
@@ -67,6 +67,5 @@ export function parseSigningKeys(serialized: string): ReadonlyMap<string, KeyObj
       createPublicKey({ key: Buffer.concat([spkiPrefix, raw]), format: 'der', type: 'spki' }),
     );
   }
-  if (!result.size) throw new Error('At least one release signing public key is required');
   return result;
 }

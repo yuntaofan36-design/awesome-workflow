@@ -76,7 +76,7 @@ export const ReleaseSchema = z.object({
   version: SemanticVersionSchema,
   manifest: ReleaseManifestSchema,
   manifestSha256: Sha256Schema,
-  signature: PublisherSignatureSchema,
+  signature: PublisherSignatureSchema.optional(),
   sbom: SbomDescriptorSchema,
   validationEvidence: z.array(ValidationEvidenceSchema),
   status: ReleaseStatusSchema,
@@ -93,7 +93,7 @@ export type ListReleasesQuery = z.infer<typeof ListReleasesQuerySchema>;
 export const CreateReleaseInputSchema = z.object({
   version: SemanticVersionSchema,
   manifest: ReleaseManifestSchema,
-  signature: PublisherSignatureSchema,
+  signature: PublisherSignatureSchema.optional(),
   sbom: SbomDescriptorSchema,
 });
 export type CreateReleaseInput = z.infer<typeof CreateReleaseInputSchema>;
@@ -111,7 +111,7 @@ export const CreateArtifactInputSchema = z.object({
     .positive()
     .max(2 * 1024 * 1024 * 1024),
   sha256: Sha256Schema,
-  signature: PublisherSignatureSchema,
+  signature: PublisherSignatureSchema.optional(),
   sbom: SbomDescriptorSchema,
 });
 export type CreateArtifactInput = z.infer<typeof CreateArtifactInputSchema>;

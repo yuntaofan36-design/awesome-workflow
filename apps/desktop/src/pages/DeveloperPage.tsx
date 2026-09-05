@@ -24,8 +24,6 @@ export function DeveloperPage() {
   const [directory, setDirectory] = useState('');
   const [packagePath, setPackagePath] = useState('');
   const [sha256, setSha256] = useState('');
-  const [signature, setSignature] = useState('');
-  const [keyId, setKeyId] = useState('');
   const [installManifestJson, setInstallManifestJson] = useState('');
   const manifest = useDesktopStore(selectValidatedManifest);
   const localizedManifest = manifest ? resolveApplicationContent(manifest, manifest.localizations) : null;
@@ -132,14 +130,6 @@ export function DeveloperPage() {
               <Button onClick={() => void choosePackage()}>{t('common.browse')}</Button>
             </div>
             <Input value={sha256} onChange={setSha256} placeholder={t('developer.digestPlaceholder')} />
-            <div className="field-pair">
-              <Input value={keyId} onChange={setKeyId} placeholder={t('developer.keyIdPlaceholder')} />
-              <Input
-                value={signature}
-                onChange={setSignature}
-                placeholder={t('developer.signaturePlaceholder')}
-              />
-            </div>
             <Input.TextArea
               value={installManifestJson}
               onChange={setInstallManifestJson}
@@ -148,14 +138,14 @@ export function DeveloperPage() {
             />
             <Button
               type="primary"
-              disabled={!packagePath || sha256.length !== 64 || !signature || !keyId || !installManifest}
+              disabled={!packagePath || sha256.length !== 64 || !installManifest}
               onClick={() =>
                 installManifest &&
                 void desktopHost
-                  .installSignedPackage({ packagePath, sha256, signature, keyId, manifest: installManifest })
+                  .installPackage({ packagePath, sha256, manifest: installManifest })
                   .then(() => Message.success(t('developer.installedMessage')))
                   .catch((error: unknown) =>
-                    Message.error(formatUiError(normalizeUiError(error, 'signed_package_install_failed'), t)),
+                    Message.error(formatUiError(normalizeUiError(error, 'package_install_failed'), t)),
                   )
               }
             >

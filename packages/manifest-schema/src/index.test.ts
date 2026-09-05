@@ -319,6 +319,11 @@ test('signature payload is deterministic and excludes only the signature value',
   assert.equal(payload, canonicalizeManifestForSignature({ ...manifest, signature: { ...signature } }));
 });
 
+test('web manifests still require a publisher signature', () => {
+  const { signature: _signature, ...unsigned } = federationManifest;
+  assert.equal(FederationWebManifestSchema.safeParse(unsigned).success, false);
+});
+
 test('artifact-set integrity is independent of descriptor order', async () => {
   const artifacts = [
     { name: 'b', fileName: 'b.zip', mediaType: 'application/zip', size: 2, sha256: 'b'.repeat(64) },
@@ -355,7 +360,7 @@ test('signed artifact ordering is locale-independent code-point order', () => {
   assert.ok(canonical.indexOf('Z-runtime') < canonical.indexOf('a-runtime'));
 });
 
-test('desktop localized metadata is signed and constrained to supported locales', () => {
+test('desktop localized metadata is canonicalized without a publisher signature', () => {
   const desktopManifest = {
     ...identity,
     artifacts: [
@@ -390,7 +395,9 @@ test('desktop localized metadata is signed and constrained to supported locales'
     localizations: { 'en-US': { name: 'English name', description: 'English description' } },
   });
   assert.equal(manifest.defaultLocale, 'zh-CN');
-  assert.match(canonicalizeManifestForSignature(manifest), /English name/);
+  assert.match(canonicalizeManifest(manifest), /English name/);
+  assert.equal('signature' in manifest, false);
+  assert.throws(() => canonicalizeManifestForSignature(manifest), /do not carry publisher signatures/);
   assert.equal(
     DesktopReleaseManifestSchema.safeParse({
       ...desktopManifest,

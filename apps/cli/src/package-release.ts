@@ -30,7 +30,7 @@ export type PackagedArtifactMetadata = {
   contentType: 'application/zip';
   size: number;
   sha256: string;
-  signature: PublisherSignature;
+  signature?: PublisherSignature;
   sbom: PackageSbomMetadata;
 };
 
@@ -70,11 +70,6 @@ export async function initializeManifest(options: {
   name?: string;
   outputPath: string;
 }): Promise<ReleaseManifest> {
-  const signature = {
-    algorithm: 'ed25519' as const,
-    keyId: 'unconfigured-publisher-key',
-    value: UNSIGNED_PLACEHOLDER,
-  };
   let manifest: unknown;
   if (options.kind === 'web') {
     const developmentOrigin = 'http://localhost:5173';
@@ -85,7 +80,11 @@ export async function initializeManifest(options: {
       version: '0.1.0',
       artifacts: [],
       integrity: { algorithm: 'sha256', digest: await computeArtifactSetIntegritySha256([]) },
-      signature,
+      signature: {
+        algorithm: 'ed25519' as const,
+        keyId: 'unconfigured-publisher-key',
+        value: UNSIGNED_PLACEHOLDER,
+      },
       runtime: 'federation',
       routeBase: `/${options.appId}`,
       hostApiVersion: '1',
@@ -122,7 +121,6 @@ export async function initializeManifest(options: {
       description: cliText('manifest.desktopDescription'),
       artifacts: [artifact],
       integrity: { algorithm: 'sha256', digest: await computeArtifactSetIntegritySha256([artifact]) },
-      signature,
       runtimes: [
         {
           kind: 'web-ui',
@@ -186,16 +184,16 @@ export async function packageRelease(options: {
   inputDirectory?: string;
   artifactInputs?: readonly ArtifactInput[];
   outputDirectory: string;
-  keyId: string;
+  keyId?: string;
   privateKeyPath?: string;
   privateKeyEnvironmentName?: string;
   artifactName?: string;
   environment?: NodeJS.ProcessEnv;
   redactor?: SecretRedactor;
 }): Promise<PackageResult> {
-  if (!options.keyId || options.keyId.length > 160) throw new CliError(cliText('package.keyId'));
   const outputDirectory = resolve(options.outputDirectory);
   const manifest = await readManifest(options.manifestPath);
+  const signingKeyId = manifest.kind === 'web' ? requireWebSigningKeyId(options.keyId) : undefined;
   const legacyMode = options.artifactInputs === undefined;
   const inputs = selectArtifactInputs(manifest, options);
   const builtArtifacts = await Promise.all(
@@ -241,7 +239,7 @@ export async function packageRelease(options: {
     );
   }
 
-  const unsignedCandidate = updateRuntimeIntegrity(
+  const packageManifestCandidate = updateRuntimeIntegrity(
     {
       ...manifest,
       artifacts: updatedArtifacts,
@@ -249,17 +247,27 @@ export async function packageRelease(options: {
         algorithm: 'sha256' as const,
         digest: await computeArtifactSetIntegritySha256(updatedArtifacts),
       },
-      signature: { algorithm: 'ed25519' as const, keyId: options.keyId, value: UNSIGNED_PLACEHOLDER },
     } as ReleaseManifest,
     legacyMode ? builtArtifacts[0]!.sourceEntries : [],
   );
-  const parsedUnsigned = ReleaseManifestSchema.parse(unsignedCandidate);
-  const privateKey = await loadPrivateKey(options);
-  const manifestSignature = signatureEnvelope(
-    options.keyId,
-    sign(null, Buffer.from(canonicalizeManifestForSignature(parsedUnsigned), 'utf8'), privateKey),
-  );
-  const signedManifest = ReleaseManifestSchema.parse({ ...parsedUnsigned, signature: manifestSignature });
+  let packagedManifest: ReleaseManifest;
+  let privateKey: KeyObject | undefined;
+  if (packageManifestCandidate.kind === 'web') {
+    const parsedUnsigned = ReleaseManifestSchema.parse({
+      ...packageManifestCandidate,
+      signature: { algorithm: 'ed25519', keyId: signingKeyId, value: UNSIGNED_PLACEHOLDER },
+    });
+    privateKey = await loadPrivateKey(options);
+    const manifestSignature = signatureEnvelope(
+      signingKeyId!,
+      sign(null, Buffer.from(canonicalizeManifestForSignature(parsedUnsigned), 'utf8'), privateKey),
+    );
+    packagedManifest = ReleaseManifestSchema.parse({ ...parsedUnsigned, signature: manifestSignature });
+  } else {
+    const { signature: _legacySignature, ...unsignedDesktopManifest } =
+      packageManifestCandidate as ReleaseManifest & { signature?: PublisherSignature };
+    packagedManifest = ReleaseManifestSchema.parse(unsignedDesktopManifest);
+  }
   const packagedArtifacts: PackagedArtifactMetadata[] = builtArtifacts.map((artifact) => {
     const primaryDescriptor: SbomDescriptor = {
       format: 'cyclonedx-json',
@@ -274,10 +282,14 @@ export async function packageRelease(options: {
       contentType: 'application/zip',
       size: artifact.archive.length,
       sha256: artifact.sha256,
-      signature: signatureEnvelope(
-        options.keyId,
-        sign(null, Buffer.from(artifact.sha256, 'hex'), privateKey),
-      ),
+      ...(privateKey && signingKeyId
+        ? {
+            signature: signatureEnvelope(
+              signingKeyId,
+              sign(null, Buffer.from(artifact.sha256, 'hex'), privateKey),
+            ),
+          }
+        : {}),
       sbom: {
         primary: { path: artifact.cyclonedxFileName, descriptor: primaryDescriptor },
         cyclonedxPath: artifact.cyclonedxFileName,
@@ -297,7 +309,7 @@ export async function packageRelease(options: {
 
   await mkdir(outputDirectory, { recursive: true });
   await Promise.all([
-    writeFile(join(outputDirectory, manifestPath), `${JSON.stringify(signedManifest, null, 2)}\n`, 'utf8'),
+    writeFile(join(outputDirectory, manifestPath), `${JSON.stringify(packagedManifest, null, 2)}\n`, 'utf8'),
     writeFile(join(outputDirectory, 'package.json'), `${JSON.stringify(metadata, null, 2)}\n`, 'utf8'),
     ...builtArtifacts.flatMap((artifact) => [
       writeFile(join(outputDirectory, artifact.artifactFileName), artifact.archive),
@@ -308,7 +320,7 @@ export async function packageRelease(options: {
   return {
     outputDirectory,
     metadataPath: join(outputDirectory, 'package.json'),
-    manifest: signedManifest,
+    manifest: packagedManifest,
     metadata,
     artifacts: packagedArtifacts,
   };
@@ -335,6 +347,9 @@ export async function readPackageMetadata(metadataPath: string): Promise<{
   const manifest = await readManifest(resolvePackageChild(directory, metadata.manifestPath));
   const artifactMetadata =
     metadata.schemaVersion === 1 ? [{ ...metadata.artifact, sbom: metadata.sbom }] : metadata.artifacts;
+  if (manifest.kind === 'web' && artifactMetadata.some((artifact) => !artifact.signature)) {
+    throw new CliError(cliText('package.webSignatureRequired'));
+  }
   if (artifactMetadata.length !== manifest.artifacts.length) {
     throw new CliError(cliText('package.metadataArtifactSet'));
   }
@@ -448,6 +463,11 @@ async function loadPrivateKey(options: {
   }
   if (key.asymmetricKeyType !== 'ed25519') throw new CliError(cliText('package.keyAlgorithm'));
   return key;
+}
+
+function requireWebSigningKeyId(keyId: string | undefined): string {
+  if (!keyId || keyId.length > 160) throw new CliError(cliText('package.keyId'));
+  return keyId;
 }
 
 function signatureEnvelope(keyId: string, bytes: Buffer): PublisherSignature {
@@ -636,7 +656,7 @@ function parsePackagedArtifact(value: unknown): PackagedArtifactMetadata {
     value.size <= 0 ||
     typeof value.sha256 !== 'string' ||
     !/^[a-f0-9]{64}$/.test(value.sha256) ||
-    !isPublisherSignature(value.signature)
+    (value.signature !== undefined && !isPublisherSignature(value.signature))
   ) {
     throw new CliError(cliText('package.artifactMetadataShape'));
   }
@@ -647,7 +667,7 @@ function parsePackagedArtifact(value: unknown): PackagedArtifactMetadata {
     contentType: 'application/zip',
     size: value.size,
     sha256: value.sha256,
-    signature: value.signature,
+    ...(value.signature ? { signature: value.signature } : {}),
     sbom,
   };
 }

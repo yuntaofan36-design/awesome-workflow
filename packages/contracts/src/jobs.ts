@@ -12,21 +12,34 @@ export const DownloadableSbomSchema = SbomDescriptorSchema.extend({ url: z.strin
 
 export const ReleaseValidationQueueName = 'release-validation' as const;
 export const ReleaseValidationJobName = 'release.validate' as const;
-export const ReleaseValidationJobSchema = z.object({
-  releaseId: z.string().uuid(),
-  manifest: ReleaseManifestSchema,
-  artifacts: z.array(
-    z.object({
-      artifactId: z.string().uuid(),
-      fileName: z.string().min(1).max(240),
-      url: z.string().url(),
-      expectedSha256: Sha256Schema,
-      expectedSize: z.number().int().positive(),
-      signature: PublisherSignatureSchema,
-      sbom: DownloadableSbomSchema,
-    }),
-  ),
-});
+export const ReleaseValidationJobSchema = z
+  .object({
+    releaseId: z.string().uuid(),
+    manifest: ReleaseManifestSchema,
+    artifacts: z.array(
+      z.object({
+        artifactId: z.string().uuid(),
+        fileName: z.string().min(1).max(240),
+        url: z.string().url(),
+        expectedSha256: Sha256Schema,
+        expectedSize: z.number().int().positive(),
+        signature: PublisherSignatureSchema.optional(),
+        sbom: DownloadableSbomSchema,
+      }),
+    ),
+  })
+  .superRefine((job, context) => {
+    if (job.manifest.kind !== 'web') return;
+    for (const [index, artifact] of job.artifacts.entries()) {
+      if (!artifact.signature) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['artifacts', index, 'signature'],
+          message: 'Web release artifacts require a publisher signature',
+        });
+      }
+    }
+  });
 export type ReleaseValidationJob = z.infer<typeof ReleaseValidationJobSchema>;
 export const ReleaseValidationResultSchema = z
   .object({

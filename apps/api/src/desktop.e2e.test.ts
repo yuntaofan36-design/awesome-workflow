@@ -12,11 +12,6 @@ import { createApiApplication } from './bootstrap.js';
 
 const sha256 = 'a'.repeat(64);
 const authorizationLeaseSeed = Buffer.alloc(32, 7).toString('base64');
-const signature = {
-  algorithm: 'ed25519' as const,
-  keyId: 'desktop-e2e-publisher-key',
-  value: 'A'.repeat(88),
-};
 const sbom = {
   format: 'cyclonedx-json' as const,
   fileName: 'desktop-sbom.cdx.json',
@@ -116,7 +111,7 @@ test('desktop API enforces device ownership and drives install, schedule and run
     payload: {
       slug: 'desktop-e2e-runner',
       name: 'Desktop E2E runner',
-      summary: 'Signed desktop micro-application used by the control-plane E2E test',
+      summary: 'Desktop micro-application used by the control-plane E2E test',
       kind: 'desktop',
     },
   });
@@ -138,7 +133,6 @@ test('desktop API enforces device ownership and drives install, schedule and run
     version: '1.2.3',
     artifacts: [artifactDeclaration],
     integrity: { algorithm: 'sha256' as const, digest: integrity },
-    signature,
     kind: 'desktop' as const,
     name: 'Desktop E2E runner',
     description: 'Exercises installation and runtime orchestration',
@@ -161,15 +155,38 @@ test('desktop API enforces device ownership and drives install, schedule and run
     runMode: 'serial' as const,
     minHostVersion: '1.0.0',
   };
+  const webApplicationResponse = await server.inject({
+    method: 'POST',
+    url: `/api/v1/workspaces/${workspace.id}/applications`,
+    cookies: { aw_session: owner.cookie },
+    payload: {
+      slug: 'desktop-manifest-kind-regression',
+      name: 'Manifest kind regression',
+      summary: 'Rejects a desktop manifest for a web application',
+      kind: 'web',
+    },
+  });
+  assert.equal(webApplicationResponse.statusCode, 201, webApplicationResponse.body);
+  const webApplication = webApplicationResponse.json().data as { id: string };
+  const mismatchedManifestResponse = await server.inject({
+    method: 'POST',
+    url: `/api/v1/applications/${webApplication.id}/releases`,
+    cookies: { aw_session: owner.cookie },
+    payload: { version: manifest.version, manifest, sbom },
+  });
+  assert.equal(mismatchedManifestResponse.statusCode, 400, mismatchedManifestResponse.body);
+  assert.equal(mismatchedManifestResponse.json().code, 'manifest_kind_mismatch');
+
   const normalizedManifest = DesktopReleaseManifestSchema.parse(manifest);
   const releaseResponse = await server.inject({
     method: 'POST',
     url: `/api/v1/applications/${application.id}/releases`,
     cookies: { aw_session: owner.cookie },
-    payload: { version: manifest.version, manifest, signature, sbom },
+    payload: { version: manifest.version, manifest, sbom },
   });
   assert.equal(releaseResponse.statusCode, 201, releaseResponse.body);
-  const release = releaseResponse.json().data as { id: string; version: string };
+  const release = releaseResponse.json().data as { id: string; version: string; signature?: unknown };
+  assert.equal('signature' in release, false);
 
   const installationPayload = {
     workspaceId: workspace.id,
@@ -212,12 +229,12 @@ test('desktop API enforces device ownership and drives install, schedule and run
       contentType: artifactDeclaration.mediaType,
       size: artifactDeclaration.size,
       sha256,
-      signature,
       sbom,
     },
   });
   assert.equal(artifactResponse.statusCode, 201, artifactResponse.body);
-  const artifact = artifactResponse.json().data.artifact as { id: string };
+  const artifact = artifactResponse.json().data.artifact as { id: string; signature?: unknown };
+  assert.equal('signature' in artifact, false);
   assert.equal(
     (
       await server.inject({
@@ -421,7 +438,6 @@ test('desktop API enforces device ownership and drives install, schedule and run
           sha256: string;
           downloadUrl: string;
           downloadExpiresAt: string;
-          attestation: typeof signature;
         };
       }>;
     };
@@ -442,7 +458,6 @@ test('desktop API enforces device ownership and drives install, schedule and run
       sha256,
       downloadUrl: `https://artifacts.example.test/bucket/objects/sha256/${sha256}/${artifactDeclaration.fileName}`,
       downloadExpiresAt: installationSync.snapshot.installations[0]!.artifact.downloadExpiresAt,
-      attestation: signature,
     },
   });
   assert.equal(

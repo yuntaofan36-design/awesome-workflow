@@ -68,6 +68,10 @@ const manifestIdentity = {
   version: SemanticVersionSchema,
   artifacts: z.array(ManifestArtifactSchema).default([]),
   integrity: IntegritySchema,
+};
+
+const signedManifestIdentity = {
+  ...manifestIdentity,
   signature: PublisherSignatureSchema,
 };
 
@@ -226,7 +230,7 @@ function hasDuplicates(values: string[]): boolean {
 }
 
 const webManifestBase = z.object({
-  ...manifestIdentity,
+  ...signedManifestIdentity,
   kind: z.literal('web'),
   routeBase: z.string().regex(/^\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/),
   hostApiVersion: z.string().min(1).max(32).default('1'),
@@ -499,6 +503,9 @@ export function canonicalizeManifest(manifest: ReleaseManifest): string {
  */
 export function canonicalizeManifestForSignature(manifest: ReleaseManifest): string {
   const parsed = ReleaseManifestSchema.parse(manifest);
+  if (parsed.kind !== 'web') {
+    throw new Error('Desktop release manifests do not carry publisher signatures');
+  }
   const { value: _signatureValue, ...signatureIdentity } = parsed.signature;
   return canonicalJson({ ...parsed, signature: signatureIdentity });
 }

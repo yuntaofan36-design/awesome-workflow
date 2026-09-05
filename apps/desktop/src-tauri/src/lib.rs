@@ -75,6 +75,14 @@ struct DesktopLocaleInput {
     locale: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DesktopPasswordLoginInput {
+    email: String,
+    password: String,
+    locale: String,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SetLocaleInput {
@@ -328,6 +336,20 @@ async fn desktop_session_login(
 }
 
 #[tauri::command]
+async fn desktop_session_password_login(
+    state: State<'_, DesktopAuthState>,
+    input: DesktopPasswordLoginInput,
+) -> Result<DesktopSession, DesktopCommandError> {
+    let auth = Arc::clone(&state.0);
+    tauri::async_runtime::spawn_blocking(move || {
+        auth.login_password(&input.email, &input.password, &input.locale)
+    })
+    .await
+    .map_err(|error| command_error("sign_in_failed", error))?
+    .map_err(|error| command_error(auth_error_code(&error), error))
+}
+
+#[tauri::command]
 async fn desktop_session_logout(
     state: State<'_, DesktopAuthState>,
     input: DesktopLocaleInput,
@@ -539,6 +561,8 @@ fn auth_error_code(error: &AuthError) -> &'static str {
     match error {
         AuthError::CredentialUnavailable => "credential_unavailable",
         AuthError::InvalidCredential => "invalid_credential",
+        AuthError::InvalidCredentials => "invalid_credentials",
+        AuthError::PasswordAuthenticationDisabled => "password_auth_disabled",
         AuthError::InvalidResponse => "invalid_auth_response",
         AuthError::Rejected(_) => "auth_rejected",
         AuthError::InvalidApiBase => "invalid_api_base",
@@ -579,6 +603,7 @@ pub fn run() {
             desktop_session_current,
             desktop_auth_providers,
             desktop_session_login,
+            desktop_session_password_login,
             desktop_session_logout,
             desktop_api_request,
             desktop_device_enroll,
@@ -941,6 +966,39 @@ mod tests {
             serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
         assert_eq!(capability["windows"], serde_json::json!(["main"]));
         assert!(capability.get("webviews").is_none());
+    }
+
+    #[test]
+    fn password_login_permission_is_scoped_only_to_the_local_management_window() {
+        use tauri::utils::{
+            acl::{resolved::Resolved, ExecutionContext},
+            platform::Target,
+        };
+
+        let manifests =
+            serde_json::from_str(include_str!("../gen/schemas/acl-manifests.json")).unwrap();
+        let capabilities =
+            serde_json::from_str(include_str!("../gen/schemas/capabilities.json")).unwrap();
+        let resolved = Resolved::resolve(&manifests, capabilities, Target::current()).unwrap();
+        let command = "desktop_session_password_login";
+        assert!(resolved.has_app_acl);
+        let grants = resolved
+            .allowed_commands
+            .get(command)
+            .expect("the management window must be allowed to invoke password login");
+        assert_eq!(grants.len(), 1);
+        let grant = &grants[0];
+        assert_eq!(grant.context, ExecutionContext::Local);
+        assert_eq!(
+            grant
+                .windows
+                .iter()
+                .map(|pattern| pattern.as_str())
+                .collect::<Vec<_>>(),
+            vec!["main"]
+        );
+        assert!(grant.webviews.is_empty());
+        assert!(!resolved.denied_commands.contains_key(command));
     }
 
     #[test]
